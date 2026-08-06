@@ -1,69 +1,420 @@
 import Image from "next/image";
-
+import Hero from "@/components/Hero";
+import Navbar from "@/components/Navbar";
+import Pillars from "@/components/Pillars";
+import Courses from "@/components/Courses";
+import TrustSection from "@/components/TrustSection";
+import AboutVeezna from "@/components/AboutVeezna";
+import Testimonials from "@/components/Testimonials";
+import AdmissionCTA from "@/components/AdmissionCTA";
+import Footer from "@/components/Footer";
+import VLSTimeline from "@/components/VLSTimeline";
+import Impact from "@/components/Impact";
+import ProgramsGrid from "@/components/ProgramsGrid";
+import StudentPortalDashboard from "./student portal dashboard/page";
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="overflow-hidden">
+
+      <Navbar />
+   {/* HERO SECTION */}
+<section className="relative pt-24 min-h-[90vh]
+   
+       
+        bg-gradient-to-br
+        from-blue-950
+        via-blue-800
+        to-blue-600
+        flex
+        items-center
+      ">
+
+
+        {/* Background Effects */}
+
+        <div className="
+          absolute
+          top-20
+          left-10
+          w-32
+          h-32
+          bg-orange-400/20
+          rounded-full
+          blur-xl
+          animate-pulse
+        ">
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+
+        <div className="
+          absolute
+          bottom-20
+          right-20
+          w-48
+          h-48
+          bg-white/10
+          rounded-full
+          blur-2xl
+          animate-bounce
+        ">
         </div>
-      </main>
-    </div>
+
+
+
+        <div className="
+          max-w-7xl
+          mx-auto
+          px-6
+          grid
+          lg:grid-cols-2
+          gap-12
+          items-center
+          relative
+          z-10
+        ">
+
+
+
+          {/* LEFT SIDE */}
+
+          <div className="text-white">
+
+
+            <span className="
+              inline-block
+              px-5
+              py-2
+              rounded-full
+              bg-white/10
+              backdrop-blur-md
+              border
+              border-white/20
+              text-orange-300
+              font-semibold
+            ">
+
+              Vision Turns Into Mission
+
+            </span>
+
+
+
+            <h1 className="
+              mt-6
+              text-5xl
+              md:text-7xl
+              font-bold
+              leading-tight
+            ">
+
+              Empowering Minds.
+              <br />
+              Building Futures.
+
+            </h1>
+
+
+
+            <p className="
+              mt-6
+              text-lg
+              md:text-xl
+              text-blue-100
+              max-w-xl
+            ">
+
+              Veezna creates a complete learning ecosystem where students
+              develop knowledge, communication skills, confidence and
+              professional abilities for a successful future.
+
+            </p>
+
+
+
+
+            <div className="
+              mt-10
+              flex
+              gap-5
+              flex-wrap
+            ">
+
+
+              <button className="
+                px-8
+                py-4
+                rounded-full
+                bg-orange-500
+                hover:bg-orange-600
+                transition
+                shadow-xl
+                hover:scale-105
+                font-semibold
+              ">
+
+                Start Your Journey
+
+              </button>
+
+
+
+              <button className="
+                px-8
+                py-4
+                rounded-full
+                border
+                border-white/40
+                backdrop-blur-md
+                hover:bg-white
+                hover:text-blue-800
+                transition
+                font-semibold
+              ">
+
+                Explore Programs
+
+              </button>
+
+
+            </div>
+
+
+
+
+            <div className="
+              mt-12
+              flex
+              gap-10
+            ">
+
+
+              <div>
+
+                <h3 className="text-3xl font-bold">
+                  360°
+                </h3>
+
+                <p className="text-blue-200">
+                  Learning Approach
+                </p>
+
+              </div>
+
+
+
+              <div>
+
+                <h3 className="text-3xl font-bold">
+                  VLS
+                </h3>
+
+                <p className="text-blue-200">
+                  Learning System
+                </p>
+
+              </div>
+
+
+            </div>
+
+
+
+          </div>
+
+
+
+
+
+          {/* RIGHT SIDE 3D CARD */}
+
+
+          <div className="flex justify-center">
+
+
+            <div className="
+              relative
+              w-[350px]
+              h-[420px]
+              rounded-[40px]
+              bg-white/10
+              backdrop-blur-xl
+              border
+              border-white/20
+              shadow-2xl
+              p-8
+              rotate-3
+              hover:rotate-0
+              transition-all
+              duration-700
+            ">
+
+
+              <div className="
+                absolute
+                inset-0
+                rounded-[40px]
+                bg-gradient-to-br
+                from-white/20
+                to-transparent
+              ">
+              </div>
+
+
+
+              <div className="
+                relative
+                z-10
+              ">
+
+
+
+                {/* LOGO */}
+
+                <div className="
+                  w-28
+                  h-28
+                  rounded-3xl
+                  bg-white
+                  flex
+                  items-center
+                  justify-center
+                  shadow-2xl
+                  p-4
+                ">
+
+
+                  <Image
+
+                    src="/images/veezna-logo.png"
+
+                    alt="Veezna Logo"
+
+                    width={120}
+
+                    height={120}
+
+                    className="
+                      object-contain
+                    "
+
+                  />
+
+
+                </div>
+
+
+
+
+
+                <h2 className="
+                  mt-8
+                  text-3xl
+                  font-bold
+                  text-white
+                ">
+
+                  Veezna Learning System
+
+                </h2>
+
+
+
+
+                <p className="
+                  mt-5
+                  text-blue-100
+                ">
+
+                  Learn.
+                  Grow.
+                  Transform.
+
+                </p>
+
+
+
+
+                <div className="
+                  mt-8
+                  space-y-3
+                ">
+
+
+                  <div className="
+                    bg-white/10
+                    rounded-xl
+                    p-4
+                    text-white
+                  ">
+
+                    📚 Academic Excellence
+
+                  </div>
+
+
+                  <div className="
+                    bg-white/10
+                    rounded-xl
+                    p-4
+                    text-white
+                  ">
+
+                    🗣️ Communication Skills
+
+                  </div>
+
+
+                  <div className="
+                    bg-white/10
+                    rounded-xl
+                    p-4
+                    text-white
+                  ">
+
+                    🌱 Personal Growth
+
+                  </div>
+
+
+
+                </div>
+
+
+
+              </div>
+
+
+
+            </div>
+
+
+
+          </div>
+
+
+
+        </div>
+
+
+      </section>
+
+
+
+   <Courses />
+
+<Pillars />
+<VLSTimeline />
+<TrustSection />
+<Hero />
+<AboutVeezna />
+<ProgramsGrid/>
+<Testimonials />
+
+<AdmissionCTA />
+<Impact />
+<Footer />
+
+
+    </main>
   );
 }

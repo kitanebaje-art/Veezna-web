@@ -24,6 +24,7 @@ const programsData: ProgramCardProps[] = [
     features: ['Small Batches', 'Weekly Tests', 'Personal Mentoring'],
     bannerGradient: 'from-[#0057B8] via-[#00BFFF] to-[#3B82F6]',
     badgeBg: 'bg-blue-50 text-[#0057B8] border-blue-200/60',
+    badgeText: 'Recommended',
     glowColor: 'rgba(0, 87, 184, 0.15)',
     slug: 'academic-excellence',
     icon: (
@@ -33,6 +34,7 @@ const programsData: ProgramCardProps[] = [
       </svg>
     ),
   },
+
   {
     title: 'Veezna Vox',
     category: 'Communication Skills',
@@ -41,6 +43,7 @@ const programsData: ProgramCardProps[] = [
     features: ['Daily Speaking Practice', 'Group Discussions', 'Interview Training'],
     bannerGradient: 'from-[#F7931E] via-[#FFB74D] to-[#F59E0B]',
     badgeBg: 'bg-amber-50 text-[#F7931E] border-amber-200/60',
+    badgeText: 'Popular',
     glowColor: 'rgba(247, 147, 30, 0.18)',
     slug: 'veezna-vox',
     icon: (
@@ -49,6 +52,7 @@ const programsData: ProgramCardProps[] = [
       </svg>
     ),
   },
+
   {
     title: 'Web Development',
     category: 'Technology',
@@ -57,6 +61,7 @@ const programsData: ProgramCardProps[] = [
     features: ['Live Projects', 'Portfolio Building', 'Industry Skills'],
     bannerGradient: 'from-[#00BFFF] via-[#06B6D4] to-[#0284C7]',
     badgeBg: 'bg-cyan-50 text-[#0284C7] border-cyan-200/60',
+    badgeText: 'Trending',
     glowColor: 'rgba(0, 191, 255, 0.18)',
     slug: 'web-development',
     icon: (
@@ -65,6 +70,7 @@ const programsData: ProgramCardProps[] = [
       </svg>
     ),
   },
+
   {
     title: 'AI & Digital Skills',
     category: 'Future Skills',
@@ -73,6 +79,7 @@ const programsData: ProgramCardProps[] = [
     features: ['Practical AI Tools', 'Automation Basics', 'Real-world Use Cases'],
     bannerGradient: 'from-[#8B5CF6] via-[#A855F7] to-[#6366F1]',
     badgeBg: 'bg-purple-50 text-[#8B5CF6] border-purple-200/60',
+    badgeText: 'Future Skill',
     glowColor: 'rgba(139, 92, 246, 0.18)',
     slug: 'ai-digital-skills',
     icon: (
@@ -81,7 +88,7 @@ const programsData: ProgramCardProps[] = [
       </svg>
     ),
   },
-  {
+    {
     title: 'Wellness & Counselling',
     category: 'Personal Growth',
     description:
@@ -89,6 +96,7 @@ const programsData: ProgramCardProps[] = [
     features: ['One-to-One Guidance', 'Wellness Sessions', 'Career Counselling'],
     bannerGradient: 'from-[#10B981] via-[#059669] to-[#047857]',
     badgeBg: 'bg-emerald-50 text-[#059669] border-emerald-200/60',
+    badgeText: 'Support',
     glowColor: 'rgba(16, 185, 129, 0.18)',
     slug: 'wellness-counselling',
     icon: (
@@ -97,6 +105,7 @@ const programsData: ProgramCardProps[] = [
       </svg>
     ),
   },
+
   {
     title: 'Career Guidance',
     category: 'Success Planning',
@@ -105,6 +114,7 @@ const programsData: ProgramCardProps[] = [
     features: ['Career Roadmaps', 'Goal Planning', 'Expert Mentorship'],
     bannerGradient: 'from-[#EC4899] via-[#F43F5E] to-[#E11D48]',
     badgeBg: 'bg-rose-50 text-[#E11D48] border-rose-200/60',
+    badgeText: 'Guidance',
     glowColor: 'rgba(236, 72, 153, 0.18)',
     slug: 'career-guidance',
     icon: (
@@ -123,16 +133,19 @@ function ProgramCard({ program }: { program: ProgramCardProps }) {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cardRef.current) return;
+
     const rect = cardRef.current.getBoundingClientRect();
+
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
 
-    const tiltX = (y - centerY) / 20;
-    const tiltY = (centerX - x) / 20;
-
-    setTilt({ x: tiltX, y: tiltY });
+    setTilt({
+      x: (y - centerY) / 20,
+      y: (centerX - x) / 20,
+    });
   };
 
   const handleMouseLeave = () => {
@@ -142,10 +155,12 @@ function ProgramCard({ program }: { program: ProgramCardProps }) {
 
   return (
     <div className="relative group">
-      {/* Dynamic Hover Background Glow */}
+
       <div
         className="absolute inset-0 rounded-[32px] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-        style={{ backgroundColor: program.glowColor }}
+        style={{
+          backgroundColor: program.glowColor,
+        }}
       />
 
       <div
@@ -156,156 +171,154 @@ function ProgramCard({ program }: { program: ProgramCardProps }) {
         style={{
           transform: isHovered
             ? `perspective(1000px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateY(-8px)`
-            : 'perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(0px)',
+            : 'perspective(1000px) rotateX(0deg) rotateY(0deg)',
         }}
-        className="relative h-full flex flex-col justify-between rounded-[32px] bg-white/80 border border-slate-200/80 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.04)] hover:shadow-[0_25px_50px_rgba(0,87,184,0.12)] hover:border-slate-300 transition-all duration-300 ease-out overflow-hidden z-10"
+        className="relative h-full flex flex-col rounded-[32px] bg-white/80 border border-slate-200 backdrop-blur-xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden"
       >
-        {/* Top Gradient Banner */}
-        <div className={`h-3.5 w-full bg-gradient-to-r ${program.bannerGradient}`} />
 
-        <div className="p-7 sm:p-8 flex-1 flex flex-col justify-between space-y-6">
-          <div className="space-y-4">
-            {/* Header Meta: Category Badge & Icon */}
-            <div className="flex items-center justify-between">
+        <div className={`h-3 w-full bg-gradient-to-r ${program.bannerGradient}`} />
+
+        <div className="p-7 flex flex-col gap-6">
+
+          <div className="flex justify-between items-center">
+
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold uppercase border ${program.badgeBg}`}
+            >
+              {program.badgeText}
+            </span>
+
+
+            <div className="p-3 rounded-2xl bg-slate-50">
+              {program.icon}
+            </div>
+
+          </div>
+
+
+          <div>
+            <p className="text-xs uppercase text-slate-500 font-bold">
+              {program.category}
+            </p>
+
+            <h3 className="text-2xl font-black text-slate-900 mt-2">
+              {program.title}
+            </h3>
+
+            <p className="text-slate-600 mt-3 text-sm leading-relaxed">
+              {program.description}
+            </p>
+          </div>
+
+
+          <div className="flex flex-wrap gap-2">
+
+            {program.features.map((feature, index) => (
               <span
-                className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${program.badgeBg}`}
+                key={index}
+                className="px-3 py-1.5 bg-slate-100 rounded-xl text-xs font-semibold"
               >
-                {program.category}
+                ✓ {feature}
               </span>
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm transition-transform duration-300 group-hover:scale-110">
-                {program.icon}
-              </div>
-            </div>
+            ))}
 
-            {/* Title & Description */}
-            <div className="space-y-2">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight group-hover:text-[#0057B8] transition-colors">
-                {program.title}
-              </h3>
-              <p className="text-slate-600 text-sm leading-relaxed font-normal">
-                {program.description}
-              </p>
-            </div>
           </div>
 
-          <div className="space-y-6 pt-2">
-            {/* Feature Chips */}
-            <div className="flex flex-wrap gap-2">
-              {program.features.map((feature, idx) => (
-                <span
-                  key={idx}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/80 border border-slate-200/60 text-slate-700 text-xs font-semibold"
-                >
-                  <svg className="w-3.5 h-3.5 text-[#0057B8]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {feature}
-                </span>
-              ))}
-            </div>
 
-            {/* Action CTA Button */}
-            <div className="pt-2 border-t border-slate-100">
-              <a
-                href={`#${program.slug}`}
-                className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-slate-50 hover:bg-[#0057B8] text-slate-800 hover:text-white font-bold text-sm border border-slate-200 hover:border-[#0057B8] shadow-sm transition-all duration-300 group/btn"
-              >
-                <span>Learn More</span>
-                <svg
-                  className="w-4 h-4 transition-transform duration-300 group-hover/btn:translate-x-1"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-              </a>
-            </div>
-          </div>
+          <a
+            href={`#${program.slug}`}
+            className="w-full text-center py-3 rounded-xl bg-slate-100 hover:bg-[#0057B8] hover:text-white font-bold transition"
+          >
+            Learn More →
+          </a>
+
         </div>
+
       </div>
+
     </div>
   );
 }
 
+
+
 export default function ExploreOurPrograms() {
+
   return (
-    <section className="relative py-24 lg:py-36 bg-gradient-to-b from-[#FFFFFF] via-[#F4F8FC] to-[#F8FAFC] text-[#1E293B] overflow-hidden">
-      {/* Background Decorative Layer */}
-      <div className="absolute inset-0 pointer-events-none z-0">
-        {/* Soft Ambient Radial Orbs */}
-        <div className="absolute top-1/4 left-0 w-[600px] h-[600px] bg-blue-100/40 rounded-full blur-[140px] -translate-x-1/2" />
-        <div className="absolute bottom-1/3 right-0 w-[650px] h-[650px] bg-amber-100/30 rounded-full blur-[150px] translate-x-1/3" />
 
-        {/* Geometric Grid Texture */}
-        <div className="absolute inset-0 opacity-[0.03] bg-[linear-gradient(to_right,#0057B8_1px,transparent_1px),linear-gradient(to_bottom,#0057B8_1px,transparent_1px)] bg-[size:4rem_4rem]" />
-      </div>
+    <section className="relative py-24 bg-gradient-to-b from-white via-[#F4F8FC] to-white">
 
-      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Top Header */}
-        <div className="text-center max-w-3xl mx-auto space-y-4 mb-16 sm:mb-20">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-slate-200/80 shadow-sm backdrop-blur-md">
-            <span className="w-2 h-2 rounded-full bg-[#0057B8] animate-ping" />
-            <span className="text-xs font-extrabold tracking-widest text-[#0057B8] uppercase">
-              TRANSFORMATIVE OFFERINGS
-            </span>
-          </div>
+      <div className="max-w-7xl mx-auto px-6">
 
-          <h2 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900 leading-[1.12]">
-            Explore Our{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#0057B8] via-[#00BFFF] to-[#F7931E]">
-              Programs
-            </span>
+
+        <div className="text-center mb-16">
+
+          <span className="px-4 py-2 rounded-full bg-white border text-[#0057B8] text-xs font-bold">
+            TRANSFORMATIVE OFFERINGS
+          </span>
+
+
+          <h2 className="text-5xl font-black mt-6">
+            Explore Our
+            <span className="text-[#0057B8]"> Programs</span>
           </h2>
 
-          <p className="text-base sm:text-lg lg:text-xl text-slate-600 font-normal leading-relaxed">
-            Choose the learning path that matches your ambition and unlock your full potential.
+
+          <p className="text-slate-600 mt-4">
+            Choose the learning path that matches your ambition.
           </p>
+
         </div>
 
-        {/* Programs Grid: 2x3 Desktop, 2 Tablet, 1 Mobile */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10 mb-20">
-          {programsData.map((program, idx) => (
-            <ProgramCard key={idx} program={program} />
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+
+          {programsData.map((program, index) => (
+            <ProgramCard
+              key={index}
+              program={program}
+            />
           ))}
+
         </div>
 
-        {/* Full-width Bottom Guidance CTA Banner */}
-        <div className="relative rounded-[32px] bg-gradient-to-r from-[#0057B8] via-[#00418A] to-[#002855] text-white p-8 sm:p-12 lg:p-16 shadow-2xl overflow-hidden border border-white/10">
-          {/* Ambient Lighting effects */}
-          <div className="absolute top-0 right-0 w-96 h-96 bg-[#F7931E]/20 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#00BFFF]/20 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="relative z-10 max-w-3xl mx-auto text-center space-y-6">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-xs font-bold text-amber-300 uppercase tracking-widest">
-              <span>Need Guidance?</span>
-            </div>
+        <div className="mt-20 rounded-[32px] bg-gradient-to-r from-[#0057B8] to-[#002855] text-white p-12 text-center">
 
-            <h3 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight leading-tight">
-              Not Sure Which Program Is Right for You?
-            </h3>
+          <h3 className="text-4xl font-black">
+            Not Sure Which Program Is Right for You?
+          </h3>
 
-            <p className="text-slate-200 text-sm sm:text-base lg:text-lg font-normal leading-relaxed max-w-2xl mx-auto">
-              Our mentors will help you choose the best learning path based on your goals, strengths, and interests.
-            </p>
+          <p className="mt-4 text-slate-200">
+            Our mentors will help you choose the best learning path.
+          </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-              <a
-                href="#book-counselling"
-                className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-[#F7931E] hover:bg-[#e07f0f] text-white font-bold text-base shadow-lg shadow-[#F7931E]/30 transition-all hover:scale-105 active:scale-95"
-              >
-                Book Free Counselling
-              </a>
-              <a
-                href="#contact"
-                className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-base backdrop-blur-md transition-all hover:scale-105 active:scale-95"
-              >
-                Contact Us
-              </a>
-            </div>
+
+          <div className="mt-8 flex justify-center gap-4 flex-wrap">
+
+            <a
+              href="#book-counselling"
+              className="px-8 py-4 bg-[#F7931E] rounded-2xl font-bold"
+            >
+              Book Free Counselling
+            </a>
+
+
+            <a
+              href="#contact"
+              className="px-8 py-4 bg-white/10 rounded-2xl font-bold border border-white/20"
+            >
+              Contact Us
+            </a>
+
           </div>
+
         </div>
+
+
       </div>
+
     </section>
+
   );
 }

@@ -1,61 +1,85 @@
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import fs from "fs";
-import path from "path";
 
 function getAdminApp(): App {
+  // Reuse existing Firebase Admin app
   const existingApp = getApps()[0];
 
   if (existingApp) {
     return existingApp;
   }
 
-  let serviceAccount: {
-    project_id?: string;
-    client_email?: string;
-    private_key?: string;
-  } = {};
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-  // 1. Check Environment Variable
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  // ---------------------------------------------------------
+  // 1. Preferred method: Separate Vercel environment variables
+  // ---------------------------------------------------------
+  if (projectId && clientEmail && privateKey) {
     try {
-      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      return initializeApp({
+        credential: cert({
+          projectId,
+          clientEmail,
+          privateKey: privateKey.replace(/\\n/g, "\n"),
+        }),
+      });
     } catch (error) {
-      console.error("[Firebase Admin] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY JSON string.", error);
+      console.error(
+        "[Firebase Admin] Failed to initialize using environment variables:",
+        error
+      );
+
+      throw new Error(
+        "Firebase Admin initialization failed. Please check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY."
+      );
     }
   }
 
-  // 2. Check local file if available
-  if (!serviceAccount.project_id) {
-    const serviceAccountPath = path.join(process.cwd(), "firebase-service-account.json");
+  // ---------------------------------------------------------
+  // 2. Optional legacy support:
+  // FIREBASE_SERVICE_ACCOUNT_KEY as a JSON string
+  // ---------------------------------------------------------
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-    if (fs.existsSync(serviceAccountPath)) {
-      try {
-        const fileContent = fs.readFileSync(serviceAccountPath, "utf8");
-        serviceAccount = JSON.parse(fileContent);
-      } catch (error) {
-        console.error("[Firebase Admin] Failed to read local service account JSON.", error);
+  if (serviceAccountKey) {
+    try {
+      const serviceAccount = JSON.parse(serviceAccountKey);
+
+      if (
+        serviceAccount.project_id &&
+        serviceAccount.client_email &&
+        serviceAccount.private_key
+      ) {
+        return initializeApp({
+          credential: cert({
+            projectId: serviceAccount.project_id,
+            clientEmail: serviceAccount.client_email,
+            privateKey: serviceAccount.private_key.replace(/\\n/g, "\n"),
+          }),
+        });
       }
+    } catch (error) {
+      console.error(
+        "[Firebase Admin] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY:",
+        error
+      );
     }
   }
 
-  // 3. Safe Fallback for Vercel Static Build (Crucial: prevents build crash)
-  if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
-    console.warn("[Firebase Admin] No valid credentials found. Initializing fallback mock app for build time.");
-    return initializeApp({
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "build-time-placeholder",
-    });
-  }
-
-  const privateKey = serviceAccount.private_key.replace(/\\n/g, "\n");
+  // ---------------------------------------------------------
+  // 3. Build-safe fallback
+  // ---------------------------------------------------------
+  console.warn(
+    "[Firebase Admin] Firebase Admin credentials are not available during build. Using build-time placeholder."
+  );
 
   return initializeApp({
-    credential: cert({
-      projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey,
-    }),
+    projectId:
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+      "build-time-placeholder",
   });
 }
 
@@ -63,3 +87,5 @@ const adminApp = getAdminApp();
 
 export const adminAuth: Auth = getAuth(adminApp);
 export const adminDb: Firestore = getFirestore(adminApp);
+
+export default adminApp;

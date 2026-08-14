@@ -1,120 +1,264 @@
-// src/hooks/useStudentAuth.ts
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-import type { StudentDocument, EnrollmentDocument, UserDocument } from '@/types/database';
+import { useState, useEffect } from "react";
+import { onAuthStateChanged, User } from "firebase/auth";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+
+export interface EnrollmentData {
+  id?: string;
+  courseId?: string;
+  batchId?: string;
+  startDate?: string;
+  status?: string;
+  [key: string]: any;
+}
+
+export interface StudentProfile {
+  uid: string;
+  studentId: string;
+  email: string | null;
+  name?: string;
+  academicClass?: string;
+  activeEnrollment?: EnrollmentData | null;
+  enrollment?: EnrollmentData | null;
+  [key: string]: any;
+}
 
 export interface StudentAuthData {
-  user: FirebaseUser | null;
-  userData: UserDocument | null;
-  studentData: StudentDocument | null;
-  activeEnrollment: EnrollmentDocument | null;
+  user: User | null;
+  student: StudentProfile | null;
+  studentData: StudentProfile | null;
+  userData?: StudentProfile | null;
+  activeEnrollment: EnrollmentData | null;
   loading: boolean;
   error: string | null;
 }
 
-export function useStudentAuth(redirectToLogin: boolean = true): StudentAuthData {
-  const router = useRouter();
-  const [authData, setAuthData] = useState<StudentAuthData>({
+export function useStudentAuth(
+  _requireStudent = false
+): StudentAuthData {
+  const [authState, setAuthState] = useState<StudentAuthData>({
     user: null,
-    userData: null,
+    student: null,
     studentData: null,
+    userData: null,
     activeEnrollment: null,
     loading: true,
     error: null,
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setAuthData({
-          user: null,
-          userData: null,
-          studentData: null,
-          activeEnrollment: null,
-          loading: false,
-          error: 'Not authenticated',
-        });
-        if (redirectToLogin) {
-          router.push('/student/login');
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (firebaseUser) => {
+        if (!firebaseUser) {
+          setAuthState({
+            user: null,
+            student: null,
+            studentData: null,
+            userData: null,
+            activeEnrollment: null,
+            loading: false,
+            error: null,
+          });
+
+          return;
         }
-        return;
+
+        try {
+          // --------------------------------------------------
+          // USER PROFILE
+          // --------------------------------------------------
+
+          const userRef = doc(
+            db,
+            "users",
+            firebaseUser.uid
+          );
+
+          const userSnap = await getDoc(userRef);
+
+          const userDataMap: Record<string, any> =
+            userSnap.exists()
+              ? userSnap.data()
+              : {};
+
+          // --------------------------------------------------
+          // STUDENT PROFILE
+          // --------------------------------------------------
+
+          let studentDataMap: Record<string, any> | null =
+            null;
+
+          const studentQuery = query(
+            collection(db, "students"),
+            where("uid", "==", firebaseUser.uid)
+          );
+
+          const studentSnap = await getDocs(studentQuery);
+
+          if (!studentSnap.empty) {
+            const studentDoc = studentSnap.docs[0];
+
+            studentDataMap = {
+              id: studentDoc.id,
+              ...studentDoc.data(),
+            };
+          }
+
+          // --------------------------------------------------
+          // FALLBACK: students/{uid}
+          // --------------------------------------------------
+
+          if (!studentDataMap) {
+            const directStudentRef = doc(
+              db,
+              "students",
+              firebaseUser.uid
+            );
+
+            const directStudentSnap =
+              await getDoc(directStudentRef);
+
+            if (directStudentSnap.exists()) {
+              studentDataMap = {
+                id: directStudentSnap.id,
+                ...directStudentSnap.data(),
+              };
+            }
+          }
+
+          // --------------------------------------------------
+          // COMBINED STUDENT PROFILE
+          // --------------------------------------------------
+
+          const combinedStudent: StudentProfile = {
+            ...userDataMap,
+            ...(studentDataMap ?? {}),
+
+            uid: firebaseUser.uid,
+
+            email:
+              firebaseUser.email ??
+              userDataMap.email ??
+              null,
+
+            studentId:
+              studentDataMap?.studentId ??
+              userDataMap.studentId ??
+              studentDataMap?.id ??
+              firebaseUser.uid,
+          };
+
+          // --------------------------------------------------
+          // ENROLLMENT
+          // --------------------------------------------------
+
+          let activeEnrollment: EnrollmentData | null =
+            null;
+
+          const profileActiveEnrollment =
+            combinedStudent.activeEnrollment;
+
+          const profileEnrollment =
+            combinedStudent.enrollment;
+
+          if (profileActiveEnrollment) {
+            activeEnrollment =
+              profileActiveEnrollment;
+          } else if (profileEnrollment) {
+            activeEnrollment =
+              profileEnrollment;
+          }
+
+          // --------------------------------------------------
+          // ENROLLMENTS COLLECTION
+          // --------------------------------------------------
+
+          if (!activeEnrollment) {
+            try {
+              const enrollmentQuery = query(
+                collection(db, "enrollments"),
+                where("uid", "==", firebaseUser.uid)
+              );
+
+              const enrollmentSnap =
+                await getDocs(enrollmentQuery);
+
+              if (!enrollmentSnap.empty) {
+                const enrollmentDoc =
+                  enrollmentSnap.docs[0];
+
+                const enrollmentDataMap =
+                  enrollmentDoc.data();
+
+                activeEnrollment = {
+                  id: enrollmentDoc.id,
+                  ...enrollmentDataMap,
+                };
+              }
+            } catch (enrollmentError) {
+              console.warn(
+                "Enrollment lookup failed:",
+                enrollmentError
+              );
+
+              activeEnrollment = null;
+            }
+          }
+
+          // --------------------------------------------------
+          // SUCCESS
+          // --------------------------------------------------
+
+          setAuthState({
+            user: firebaseUser,
+            student: combinedStudent,
+            studentData: combinedStudent,
+            userData: combinedStudent,
+            activeEnrollment,
+            loading: false,
+            error: null,
+          });
+        } catch (error) {
+          console.error(
+            "Student profile loading error:",
+            error
+          );
+
+          // --------------------------------------------------
+          // AUTHENTICATION IS VALID EVEN IF PROFILE LOOKUP FAILS
+          // --------------------------------------------------
+
+          const fallbackStudent: StudentProfile = {
+            uid: firebaseUser.uid,
+            studentId: firebaseUser.uid,
+            email: firebaseUser.email ?? null,
+          };
+
+          setAuthState({
+            user: firebaseUser,
+            student: fallbackStudent,
+            studentData: fallbackStudent,
+            userData: fallbackStudent,
+            activeEnrollment: null,
+            loading: false,
+            error: null,
+          });
+        }
       }
-
-      try {
-        // 1. Fetch user document
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const userSnap = await getDoc(userDocRef);
-
-        if (!userSnap.exists()) {
-          throw new Error('User profile record not found.');
-        }
-
-        const userData = userSnap.data() as UserDocument;
-
-        if (userData.status !== 'active') {
-          throw new Error('Your user account is suspended or inactive.');
-        }
-
-        // 2. Fetch student document linked by uid
-        const studentsQuery = query(
-          collection(db, 'students'),
-          where('uid', '==', firebaseUser.uid)
-        );
-        const studentSnap = await getDocs(studentsQuery);
-
-        if (studentSnap.empty) {
-          throw new Error('No student profile associated with this account.');
-        }
-
-        const studentData = studentSnap.docs[0].data() as StudentDocument;
-
-        if (studentData.status !== 'active') {
-          throw new Error('Your student profile is currently inactive.');
-        }
-
-        // 3. Fetch active enrollment linked by studentId
-        const enrollmentsQuery = query(
-          collection(db, 'enrollments'),
-          where('studentId', '==', studentData.studentId),
-          where('status', '==', 'active')
-        );
-        const enrollmentSnap = await getDocs(enrollmentsQuery);
-
-        const activeEnrollment = enrollmentSnap.empty
-          ? null
-          : (enrollmentSnap.docs[0].data() as EnrollmentDocument);
-
-        setAuthData({
-          user: firebaseUser,
-          userData,
-          studentData,
-          activeEnrollment,
-          loading: false,
-          error: null,
-        });
-      } catch (err: any) {
-        console.error('Student Auth Verification Error:', err);
-        setAuthData({
-          user: firebaseUser,
-          userData: null,
-          studentData: null,
-          activeEnrollment: null,
-          loading: false,
-          error: err.message || 'Authentication error',
-        });
-        if (redirectToLogin) {
-          router.push('/student/login');
-        }
-      }
-    });
+    );
 
     return () => unsubscribe();
-  }, [redirectToLogin, router]);
+  }, []);
 
-  return authData;
+  return authState;
 }

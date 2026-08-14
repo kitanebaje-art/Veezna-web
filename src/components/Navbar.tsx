@@ -45,7 +45,7 @@ export default function Navbar() {
           </Link>
 
           <Link
-            href="/#programs"
+            href="/programs"
             className="hover:text-orange-500 transition"
           >
             Programs

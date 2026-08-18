@@ -1,93 +1,138 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 import Link from "next/link";
 import {
   collection,
   getDocs,
-  addDoc,
-  doc,
-  updateDoc,
-  serverTimestamp,
   query,
   where,
-  orderBy,
-  Timestamp,
 } from "firebase/firestore";
+import {
+  getAuth,
+} from "firebase/auth";
+
 import { db } from "@/lib/firebase";
 
-// ==========================================
-// TYPES & INTERFACES
-// ==========================================
+// ============================================================
+// TYPES
+// ============================================================
 
 export interface StudentFeeRecord {
-  id: string; // Document ID in Firestore
+  id: string;
   studentId: string;
+  enrollmentId: string;
+  admissionId?: string;
+
   name: string;
   mobile: string;
   academicClass: string;
   program: string;
+
   totalFee: number;
   paidFee: number;
   pendingFee: number;
+
   status: "paid" | "pending" | "partial" | "overdue";
+
   rawStudentDoc?: any;
 }
 
 export interface PaymentTransaction {
-  id: string; // Document ID
+  id: string;
+
   paymentId?: string;
+
   studentId: string;
   studentName?: string;
+
+  enrollmentId?: string;
+  admissionId?: string;
+
   applicationNo?: string;
+
   amount: number;
-  paymentMethod: "cash" | "upi" | "bank_transfer" | "card" | "razorpay" | "other" | string;
-  paymentStatus: "paid" | "success" | "successful" | "captured" | "pending" | "failed" | "cancelled" | "refunded" | string;
-  transactionId: string;
+
+  paymentMethod:
+    | "cash"
+    | "upi"
+    | "bank_transfer"
+    | "online"
+    | string;
+
+  paymentStatus:
+    | "completed"
+    | "pending"
+    | "failed"
+    | "refunded"
+    | string;
+
+  transactionId?: string;
+
   razorpayPaymentId?: string;
+
+  receiptNumber?: string;
+
   course?: string;
   program?: string;
+
   paymentDate: string;
+
   createdAt?: any;
   updatedAt?: any;
-  remarks?: string;
+
+  notes?: string;
 }
 
 export interface RecordPaymentFormData {
   studentId: string;
   amount: string;
-  paymentMethod: "cash" | "upi" | "bank_transfer" | "card" | "other";
+
+  paymentMethod:
+    | "cash"
+    | "upi"
+    | "bank_transfer"
+    | "online";
+
   transactionId: string;
-  remarks: string;
+  notes: string;
   paymentDate: string;
 }
 
-// ==========================================
-// HELPER FUNCTIONS
-// ==========================================
+// ============================================================
+// HELPERS
+// ============================================================
 
-/**
- * Checks if a status string represents a valid, successful payment.
- */
-export function isPaymentSuccessful(statusStr: string | undefined): boolean {
+export function isPaymentSuccessful(
+  statusStr: string | undefined
+): boolean {
   if (!statusStr) return false;
+
   const s = statusStr.toLowerCase().trim();
-  return ["paid", "success", "successful", "captured"].includes(s);
+
+  return s === "completed";
 }
 
-/**
- * Formats mixed Firestore date/timestamp/string into a safe localized date string.
- */
 export function normalizeDateString(val: any): string {
   if (!val) return "N/A";
+
   try {
-    if (typeof val === "object" && typeof val.toDate === "function") {
+    if (
+      typeof val === "object" &&
+      typeof val.toDate === "function"
+    ) {
       return val.toDate().toLocaleDateString("en-IN", {
         year: "numeric",
         month: "short",
         day: "numeric",
       });
     }
+
     if (val instanceof Date) {
       return val.toLocaleDateString("en-IN", {
         year: "numeric",
@@ -95,8 +140,10 @@ export function normalizeDateString(val: any): string {
         day: "numeric",
       });
     }
+
     if (typeof val === "string") {
       const parsed = new Date(val);
+
       if (!isNaN(parsed.getTime())) {
         return parsed.toLocaleDateString("en-IN", {
           year: "numeric",
@@ -104,8 +151,10 @@ export function normalizeDateString(val: any): string {
           day: "numeric",
         });
       }
+
       return val;
     }
+
     if (typeof val === "number") {
       return new Date(val).toLocaleDateString("en-IN", {
         year: "numeric",
@@ -116,14 +165,19 @@ export function normalizeDateString(val: any): string {
   } catch {
     return "N/A";
   }
+
   return "N/A";
 }
 
-/**
- * Formats a numeric value into INR currency display.
- */
 export function formatINR(val: number): string {
-  if (isNaN(val) || val === null || val === undefined) return "₹0";
+  if (
+    isNaN(val) ||
+    val === null ||
+    val === undefined
+  ) {
+    return "₹0";
+  }
+
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -131,158 +185,434 @@ export function formatINR(val: number): string {
   }).format(val);
 }
 
+// ============================================================
+// PAGE
+// ============================================================
+
 export default function FeesAndPaymentsPage() {
-  // Primary state
+  // ============================================================
+  // STATE
+  // ============================================================
+
   const [students, setStudents] = useState<StudentFeeRecord[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters & Search
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [methodFilter, setMethodFilter] = useState<string>("ALL");
-  const [programFilter, setProgramFilter] = useState<string>("ALL");
+  // Filters
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [programFilter, setProgramFilter] = useState("ALL");
 
-  // Record Payment Modal State
-  const [isRecordModalOpen, setIsRecordModalOpen] = useState<boolean>(false);
-  const [paymentFormData, setPaymentFormData] = useState<RecordPaymentFormData>({
-    studentId: "",
-    amount: "",
-    paymentMethod: "cash",
-    transactionId: "",
-    remarks: "",
-    paymentDate: new Date().toISOString().split("T")[0],
-  });
+  // Record payment modal
+  const [isRecordModalOpen, setIsRecordModalOpen] =
+    useState(false);
 
-  const [selectedStudentForPayment, setSelectedStudentForPayment] = useState<StudentFeeRecord | null>(null);
-  const [studentLookupError, setStudentLookupError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [paymentFormData, setPaymentFormData] =
+    useState<RecordPaymentFormData>({
+      studentId: "",
+      amount: "",
+      paymentMethod: "cash",
+      transactionId: "",
+      notes: "",
+      paymentDate: new Date()
+        .toISOString()
+        .split("T")[0],
+    });
 
-  // View Details Modal State
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState<boolean>(false);
-  const [selectedStudentDetails, setSelectedStudentDetails] = useState<StudentFeeRecord | null>(null);
+  const [
+    selectedStudentForPayment,
+    setSelectedStudentForPayment,
+  ] = useState<StudentFeeRecord | null>(null);
 
-  // ==========================================
-  // DATA FETCHING & SYNCHRONIZATION
-  // ==========================================
+  const [studentLookupError, setStudentLookupError] =
+    useState<string | null>(null);
+
+  const [formError, setFormError] =
+    useState<string | null>(null);
+
+  const [isSubmitting, setIsSubmitting] =
+    useState(false);
+
+  // Details modal
+  const [isDetailsModalOpen, setIsDetailsModalOpen] =
+    useState(false);
+
+  const [
+    selectedStudentDetails,
+    setSelectedStudentDetails,
+  ] = useState<StudentFeeRecord | null>(null);
+
+  // ============================================================
+  // FETCH DATA
+  // ============================================================
 
   const fetchFeeData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // 1. Fetch Payments Collection (Source of Truth for Transactions)
-      const paymentsSnap = await getDocs(collection(db, "payments"));
+      // --------------------------------------------------------
+      // 1. PAYMENTS
+      // --------------------------------------------------------
+
+      const paymentsSnap = await getDocs(
+        collection(db, "payments")
+      );
+
       const paymentList: PaymentTransaction[] = [];
 
       paymentsSnap.forEach((docSnap) => {
         const d = docSnap.data();
-        const pId = d.paymentId || d.transactionId || docSnap.id;
-        const sId = d.studentId || d.studentID || d.userId || d.regNo || "";
-        const sName = d.studentName || d.name || d.fullName || "N/A";
-        const amt = Number(d.amount || d.totalAmount || d.paidAmount || 0);
+
+        const amount = Number(
+          d.amount ??
+            d.totalAmount ??
+            d.paidAmount ??
+            0
+        );
 
         paymentList.push({
           id: docSnap.id,
-          paymentId: pId,
-          studentId: sId,
-          studentName: sName,
-          applicationNo: d.applicationNo || d.appNo || "",
-          amount: isNaN(amt) ? 0 : amt,
-          paymentMethod: d.paymentMethod || d.method || "other",
-          paymentStatus: d.paymentStatus || d.status || "paid",
-          transactionId: d.transactionId || d.txnId || d.razorpayPaymentId || pId,
-          razorpayPaymentId: d.razorpayPaymentId || d.razorpay_payment_id || "",
-          course: d.course || d.program || "",
-          program: d.program || d.course || "",
-          paymentDate: normalizeDateString(d.paymentDate || d.createdAt || d.date),
+
+          paymentId:
+            d.paymentId || docSnap.id,
+
+          studentId:
+            d.studentId ||
+            d.studentID ||
+            d.userId ||
+            "",
+
+          studentName:
+            d.studentName ||
+            d.name ||
+            d.fullName ||
+            "N/A",
+
+          enrollmentId:
+            d.enrollmentId || "",
+
+          admissionId:
+            d.admissionId || "",
+
+          applicationNo:
+            d.applicationNo ||
+            d.appNo ||
+            "",
+
+          amount: Number.isFinite(amount)
+            ? amount
+            : 0,
+
+          paymentMethod:
+            d.paymentMethod ||
+            "cash",
+
+          paymentStatus:
+            d.paymentStatus ||
+            "completed",
+
+          transactionId:
+            d.transactionId ||
+            "",
+
+          razorpayPaymentId:
+            d.razorpayPaymentId ||
+            d.razorpay_payment_id ||
+            "",
+
+          receiptNumber:
+            d.receiptNumber ||
+            "",
+
+          course:
+            d.course ||
+            d.program ||
+            "",
+
+          program:
+            d.program ||
+            d.course ||
+            "",
+
+          paymentDate:
+            normalizeDateString(
+              d.paymentDate ||
+                d.createdAt ||
+                d.date
+            ),
+
           createdAt: d.createdAt,
           updatedAt: d.updatedAt,
-          remarks: d.remarks || d.note || "",
+
+          notes:
+            d.notes ||
+            d.remarks ||
+            "",
         });
       });
 
-      // Sort payments newest first
+      // Newest first
       paymentList.sort((a, b) => {
-        const timeA = a.createdAt?.seconds ? a.createdAt.seconds : 0;
-        const timeB = b.createdAt?.seconds ? b.createdAt.seconds : 0;
+        const timeA =
+          a.createdAt?.seconds || 0;
+
+        const timeB =
+          b.createdAt?.seconds || 0;
+
         return timeB - timeA;
       });
 
       setPayments(paymentList);
 
-      // Map payments per student to eliminate double-counting
-      const paymentsPerStudent: Record<string, number> = {};
-      paymentList.forEach((p) => {
-        if (p.studentId && isPaymentSuccessful(p.paymentStatus)) {
-          const key = p.studentId.trim().toLowerCase();
-          paymentsPerStudent[key] = (paymentsPerStudent[key] || 0) + p.amount;
+      // --------------------------------------------------------
+      // 2. PAYMENT TOTAL PER STUDENT
+      // --------------------------------------------------------
+
+      const paymentsPerStudent: Record<
+        string,
+        number
+      > = {};
+
+      paymentList.forEach((payment) => {
+        if (
+          payment.studentId &&
+          isPaymentSuccessful(
+            payment.paymentStatus
+          )
+        ) {
+          const key = payment.studentId
+            .trim()
+            .toLowerCase();
+
+          paymentsPerStudent[key] =
+            (paymentsPerStudent[key] || 0) +
+            payment.amount;
         }
       });
 
-      // 2. Fetch Students Collection
-      let studentsSnap;
-      try {
-        studentsSnap = await getDocs(collection(db, "students"));
-      } catch (stErr) {
-        // Fallback check if collection is 'users'
-        studentsSnap = await getDocs(collection(db, "users"));
-      }
+      // --------------------------------------------------------
+      // 3. STUDENTS
+      // --------------------------------------------------------
 
-      const studentList: StudentFeeRecord[] = [];
+      const studentsSnap = await getDocs(
+        collection(db, "students")
+      );
+
+      // --------------------------------------------------------
+      // 4. ENROLLMENTS
+      // --------------------------------------------------------
+
+      const enrollmentsSnap = await getDocs(
+        collection(db, "enrollments")
+      );
+
+      const enrollmentsByStudent: Record<
+        string,
+        any[]
+      > = {};
+
+      enrollmentsSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+
+        const studentId =
+          d.studentId ||
+          d.studentID ||
+          "";
+
+        if (!studentId) return;
+
+        const key = String(studentId)
+          .trim()
+          .toLowerCase();
+
+        if (!enrollmentsByStudent[key]) {
+          enrollmentsByStudent[key] = [];
+        }
+
+        enrollmentsByStudent[key].push({
+          id: docSnap.id,
+          ...d,
+        });
+      });
+
+      // --------------------------------------------------------
+      // 5. BUILD STUDENT FEE RECORDS
+      // --------------------------------------------------------
+
+      const studentList: StudentFeeRecord[] =
+        [];
 
       studentsSnap.forEach((docSnap) => {
         const d = docSnap.data();
-        const sId = d.studentId || d.studentID || d.regNo || d.id || docSnap.id;
-        const sName = d.fullName || d.name || d.studentName || "Unnamed Student";
-        const mobile = d.mobile || d.phone || d.phoneNumber || "N/A";
-        const academicClass = d.academicClass || d.class || d.grade || "N/A";
-        const program = d.program || d.course || d.department || "N/A";
 
-        const totalFee = Number(d.totalFee || d.totalFees || d.courseFee || 0);
-        
-        // Compute collected fee using payments collection as source of truth
-        const key = String(sId).trim().toLowerCase();
-        const trackedTransactionsTotal = paymentsPerStudent[key] || 0;
-        
-        // If student document has baseline fee paid prior to system transaction records
-        const docPaid = Number(d.paidFee || d.feePaid || d.paidAmount || 0);
-        const finalPaidFee = Math.max(docPaid, trackedTransactionsTotal);
-        
-        const pendingFee = Math.max(0, totalFee - finalPaidFee);
+        const studentId =
+          d.studentId ||
+          d.studentID ||
+          d.regNo ||
+          d.id ||
+          docSnap.id;
 
-        let calculatedStatus: "paid" | "pending" | "partial" | "overdue" = "pending";
-        if (totalFee > 0 && finalPaidFee >= totalFee) {
-          calculatedStatus = "paid";
-        } else if (finalPaidFee > 0 && finalPaidFee < totalFee) {
-          calculatedStatus = "partial";
-        } else {
-          calculatedStatus = "pending";
+        const studentName =
+          d.fullName ||
+          d.name ||
+          d.studentName ||
+          "Unnamed Student";
+
+        const mobile =
+          d.mobile ||
+          d.phone ||
+          d.phoneNumber ||
+          "N/A";
+
+        const academicClass =
+          d.academicClass ||
+          d.class ||
+          d.grade ||
+          "N/A";
+
+        const program =
+          d.program ||
+          d.course ||
+          d.department ||
+          "N/A";
+
+        const studentKey = String(studentId)
+          .trim()
+          .toLowerCase();
+
+        // ------------------------------------------------------
+        // FIND ENROLLMENT
+        // ------------------------------------------------------
+
+        const studentEnrollments =
+          enrollmentsByStudent[
+            studentKey
+          ] || [];
+
+        const enrollment =
+          studentEnrollments[0];
+
+        const enrollmentId =
+          d.enrollmentId ||
+          enrollment?.id ||
+          "";
+
+        const admissionId =
+          d.admissionId ||
+          enrollment?.admissionId ||
+          "";
+
+        // ------------------------------------------------------
+        // TOTAL FEE
+        // ------------------------------------------------------
+
+        const totalFee = Number(
+          d.totalFee ??
+            d.totalFees ??
+            d.courseFee ??
+            enrollment?.totalFee ??
+            enrollment?.totalFees ??
+            enrollment?.courseFee ??
+            0
+        );
+
+        // ------------------------------------------------------
+        // PAID FEE
+        // ------------------------------------------------------
+
+        const paymentCollectionTotal =
+          paymentsPerStudent[
+            studentKey
+          ] || 0;
+
+        const legacyPaid = Number(
+          d.paidFee ??
+            d.feePaid ??
+            d.paidAmount ??
+            0
+        );
+
+        const paidFee = Math.max(
+          legacyPaid,
+          paymentCollectionTotal
+        );
+
+        // ------------------------------------------------------
+        // PENDING
+        // ------------------------------------------------------
+
+        const pendingFee = Math.max(
+          0,
+          totalFee - paidFee
+        );
+
+        // ------------------------------------------------------
+        // STATUS
+        // ------------------------------------------------------
+
+        let status:
+          | "paid"
+          | "pending"
+          | "partial"
+          | "overdue" = "pending";
+
+        if (
+          totalFee > 0 &&
+          paidFee >= totalFee
+        ) {
+          status = "paid";
+        } else if (
+          paidFee > 0 &&
+          paidFee < totalFee
+        ) {
+          status = "partial";
         }
 
         studentList.push({
           id: docSnap.id,
-          studentId: sId,
-          name: sName,
-          mobile,
-          academicClass,
-          program,
+
+          studentId: String(studentId),
+
+          enrollmentId,
+
+          ...(admissionId
+            ? { admissionId }
+            : {}),
+
+          name: String(studentName),
+
+          mobile: String(mobile),
+
+          academicClass:
+            String(academicClass),
+
+          program: String(program),
+
           totalFee,
-          paidFee: finalPaidFee,
+
+          paidFee,
+
           pendingFee,
-          status: calculatedStatus,
+
+          status,
+
           rawStudentDoc: d,
         });
       });
 
       setStudents(studentList);
     } catch (err: any) {
-      console.error("Firestore error loading fee details:", err);
+      console.error(
+        "[Fees] Firestore loading error:",
+        err
+      );
+
       setError(
         err?.message ||
-          "Failed to load fee & payment records. Please verify network or security permissions."
+          "Failed to load fee and payment records."
       );
     } finally {
       setLoading(false);
@@ -293,14 +623,21 @@ export default function FeesAndPaymentsPage() {
     fetchFeeData();
   }, [fetchFeeData]);
 
-  // ==========================================
-  // STUDENT LOOKUP & FORM HANDLERS
-  // ==========================================
+  // ============================================================
+  // STUDENT LOOKUP
+  // ============================================================
 
-  const handleStudentIdChange = (idInput: string) => {
-    const trimmed = idInput.trim();
-    setPaymentFormData((prev) => ({ ...prev, studentId: idInput }));
+  const handleStudentIdChange = (
+    idInput: string
+  ) => {
+    setPaymentFormData((prev) => ({
+      ...prev,
+      studentId: idInput,
+    }));
+
     setStudentLookupError(null);
+
+    const trimmed = idInput.trim();
 
     if (!trimmed) {
       setSelectedStudentForPayment(null);
@@ -308,291 +645,562 @@ export default function FeesAndPaymentsPage() {
     }
 
     const matched = students.find(
-      (s) =>
-        s.studentId.toLowerCase() === trimmed.toLowerCase() ||
-        s.id.toLowerCase() === trimmed.toLowerCase()
+      (student) =>
+        student.studentId
+          .toLowerCase() ===
+          trimmed.toLowerCase() ||
+        student.id
+          .toLowerCase() ===
+          trimmed.toLowerCase()
     );
 
     if (matched) {
-      setSelectedStudentForPayment(matched);
+      setSelectedStudentForPayment(
+        matched
+      );
+
       setStudentLookupError(null);
+
+      // Auto-fill pending amount
+      setPaymentFormData((prev) => ({
+        ...prev,
+        amount:
+          matched.pendingFee > 0
+            ? String(matched.pendingFee)
+            : "",
+      }));
     } else {
       setSelectedStudentForPayment(null);
-      setStudentLookupError("Student ID not found in database.");
+
+      setStudentLookupError(
+        "Student ID not found in database."
+      );
     }
   };
 
-  const handleOpenRecordModal = (student?: StudentFeeRecord) => {
+  // ============================================================
+  // OPEN RECORD PAYMENT
+  // ============================================================
+
+  const handleOpenRecordModal = (
+    student?: StudentFeeRecord
+  ) => {
     setFormError(null);
     setStudentLookupError(null);
 
-    // Auto-generate transaction ID
-    const autoTxnId = `TXN-OFF-${Date.now().toString().slice(-6)}`;
+    const transactionId =
+      `TXN-OFF-${Date.now()
+        .toString()
+        .slice(-8)}`;
 
     if (student) {
-      setSelectedStudentForPayment(student);
+      setSelectedStudentForPayment(
+        student
+      );
+
       setPaymentFormData({
         studentId: student.studentId,
-        amount: student.pendingFee > 0 ? String(student.pendingFee) : "",
+
+        amount:
+          student.pendingFee > 0
+            ? String(student.pendingFee)
+            : "",
+
         paymentMethod: "cash",
-        transactionId: autoTxnId,
-        remarks: "Offline fee payment",
-        paymentDate: new Date().toISOString().split("T")[0],
+
+        transactionId,
+
+        notes:
+          "Offline fee payment",
+
+        paymentDate:
+          new Date()
+            .toISOString()
+            .split("T")[0],
       });
     } else {
       setSelectedStudentForPayment(null);
+
       setPaymentFormData({
         studentId: "",
         amount: "",
         paymentMethod: "cash",
-        transactionId: autoTxnId,
-        remarks: "Offline fee payment",
-        paymentDate: new Date().toISOString().split("T")[0],
+        transactionId,
+        notes: "Offline fee payment",
+        paymentDate:
+          new Date()
+            .toISOString()
+            .split("T")[0],
       });
     }
 
     setIsRecordModalOpen(true);
   };
 
-  const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
+  // ============================================================
+  // RECORD PAYMENT
+  // ============================================================
 
-    if (isSubmitting) return; // Prevent double clicks
+  const handleRecordPaymentSubmit =
+    async (
+      e: React.FormEvent
+    ) => {
+      e.preventDefault();
 
-    const amountNum = parseFloat(paymentFormData.amount);
+      if (isSubmitting) return;
 
-    // 1. Validations
-    if (!selectedStudentForPayment) {
-      setFormError("Please enter a valid, existing Student ID.");
-      return;
-    }
+      setFormError(null);
 
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setFormError("Please enter a valid payment amount greater than ₹0.");
-      return;
-    }
+      // --------------------------------------------------------
+      // VALIDATION
+      // --------------------------------------------------------
 
-    if (amountNum > selectedStudentForPayment.pendingFee) {
-      setFormError(
-        `Amount ₹${amountNum.toLocaleString()} exceeds pending balance of ₹${selectedStudentForPayment.pendingFee.toLocaleString()}. Advance payments require custom authorization.`
+      if (!selectedStudentForPayment) {
+        setFormError(
+          "Please select a valid student."
+        );
+        return;
+      }
+
+      if (
+        !selectedStudentForPayment
+          .enrollmentId
+      ) {
+        setFormError(
+          "This student does not have an enrollment record. Please create/verify the enrollment before recording a payment."
+        );
+        return;
+      }
+
+      const amountNum = Number(
+        paymentFormData.amount
       );
-      return;
-    }
 
-    if (!paymentFormData.transactionId.trim()) {
-      setFormError("Transaction ID / Receipt reference is required.");
-      return;
-    }
+      if (
+        !Number.isFinite(amountNum) ||
+        amountNum <= 0
+      ) {
+        setFormError(
+          "Please enter a valid payment amount greater than ₹0."
+        );
+        return;
+      }
 
-    setIsSubmitting(true);
+      if (
+        amountNum >
+        selectedStudentForPayment.pendingFee
+      ) {
+        setFormError(
+          `Amount ${formatINR(
+            amountNum
+          )} exceeds the pending balance of ${formatINR(
+            selectedStudentForPayment.pendingFee
+          )}.`
+        );
 
-    try {
-      // 2. Try recording via API route for server-side validation
-      let success = false;
+        return;
+      }
+
+      if (
+        !paymentFormData.transactionId.trim()
+      ) {
+        setFormError(
+          "Transaction ID / receipt reference is required."
+        );
+
+        return;
+      }
+
+      setIsSubmitting(true);
+
       try {
-        const res = await fetch("/api/admin/fees/record-payment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            studentId: selectedStudentForPayment.studentId,
-            studentDocId: selectedStudentForPayment.id,
-            studentName: selectedStudentForPayment.name,
-            amount: amountNum,
-            paymentMethod: paymentFormData.paymentMethod,
-            transactionId: paymentFormData.transactionId.trim(),
-            paymentDate: paymentFormData.paymentDate,
-            remarks: paymentFormData.remarks.trim(),
-            program: selectedStudentForPayment.program,
-          }),
-        });
+        // ------------------------------------------------------
+        // FIREBASE AUTH TOKEN
+        // ------------------------------------------------------
 
-        if (res.ok) {
-          success = true;
+        const auth = getAuth();
+
+        const currentUser =
+          auth.currentUser;
+
+        if (!currentUser) {
+          throw new Error(
+            "Admin session expired. Please login again."
+          );
         }
-      } catch (apiErr) {
-        console.warn("API Route unavailable, writing directly to Firestore client SDK...", apiErr);
+
+        const idToken =
+          await currentUser.getIdToken();
+
+        // ------------------------------------------------------
+        // CALL EXISTING SECURE API
+        //
+        // /api/admin/record-payment
+        // ------------------------------------------------------
+
+        const response = await fetch(
+          "/api/admin/record-payment",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Authorization:
+                `Bearer ${idToken}`,
+            },
+
+            body: JSON.stringify({
+              studentId:
+                selectedStudentForPayment.studentId,
+
+              enrollmentId:
+                selectedStudentForPayment.enrollmentId,
+
+              admissionId:
+                selectedStudentForPayment.admissionId ||
+                undefined,
+
+              amount: amountNum,
+
+              paymentMethod:
+                paymentFormData.paymentMethod,
+
+              paymentStatus:
+                "completed",
+
+              transactionId:
+                paymentFormData.transactionId.trim(),
+
+              notes:
+                paymentFormData.notes.trim() ||
+                "Admin recorded payment",
+            }),
+          }
+        );
+
+        const result =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result?.error ||
+              "Unable to record payment."
+          );
+        }
+
+        // ------------------------------------------------------
+        // SUCCESS
+        // ------------------------------------------------------
+
+        setIsRecordModalOpen(false);
+
+        setSelectedStudentForPayment(
+          null
+        );
+
+        setFormError(null);
+
+        await fetchFeeData();
+      } catch (err: any) {
+        console.error(
+          "[Fees] Payment recording error:",
+          err
+        );
+
+        setFormError(
+          err?.message ||
+            "Failed to record payment."
+        );
+      } finally {
+        setIsSubmitting(false);
       }
+    };
 
-      // 3. Fallback direct Firestore transaction
-      if (!success) {
-        const newPaymentDoc = {
-          studentId: selectedStudentForPayment.studentId,
-          studentName: selectedStudentForPayment.name,
-          amount: amountNum,
-          paymentMethod: paymentFormData.paymentMethod,
-          paymentStatus: "paid",
-          transactionId: paymentFormData.transactionId.trim(),
-          paymentDate: paymentFormData.paymentDate,
-          program: selectedStudentForPayment.program,
-          remarks: paymentFormData.remarks.trim() || "Admin recorded payment",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-
-        await addDoc(collection(db, "payments"), newPaymentDoc);
-
-        // Update Student Record in Firestore
-        const newPaid = selectedStudentForPayment.paidFee + amountNum;
-        const newPending = Math.max(0, selectedStudentForPayment.totalFee - newPaid);
-        const newStatus = newPending === 0 ? "paid" : "partial";
-
-        const studentRef = doc(db, "students", selectedStudentForPayment.id);
-        await updateDoc(studentRef, {
-          paidFee: newPaid,
-          pendingFee: newPending,
-          status: newStatus,
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      setIsRecordModalOpen(false);
-      await fetchFeeData(); // Refresh UI
-    } catch (err: any) {
-      console.error("Error saving payment:", err);
-      setFormError("Failed to record payment: " + (err.message || "Unknown error"));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // ==========================================
-  // CALCULATED STATISTICS
-  // ==========================================
+  // ============================================================
+  // STATISTICS
+  // ============================================================
 
   const stats = useMemo(() => {
     let totalFees = 0;
     let totalCollected = 0;
 
-    students.forEach((s) => {
-      totalFees += s.totalFee;
-      totalCollected += s.paidFee;
+    students.forEach((student) => {
+      totalFees += student.totalFee;
+      totalCollected += student.paidFee;
     });
-
-    const totalPending = Math.max(0, totalFees - totalCollected);
-    const totalTransactions = payments.length;
 
     return {
       totalFees,
+
       totalCollected,
-      totalPending,
-      totalTransactions,
+
+      totalPending: Math.max(
+        0,
+        totalFees - totalCollected
+      ),
+
+      totalTransactions:
+        payments.length,
     };
   }, [students, payments]);
 
-  // Unique program options for filter
+  // ============================================================
+  // PROGRAM FILTER
+  // ============================================================
+
   const programOptions = useMemo(() => {
-    const set = new Set<string>();
-    students.forEach((s) => {
-      if (s.program && s.program !== "N/A") set.add(s.program);
+    const programs = new Set<string>();
+
+    students.forEach((student) => {
+      if (
+        student.program &&
+        student.program !== "N/A"
+      ) {
+        programs.add(
+          student.program
+        );
+      }
     });
-    return Array.from(set);
+
+    return Array.from(programs).sort();
   }, [students]);
 
-  // Filtered Students
-  const filteredStudents = useMemo(() => {
-    return students.filter((s) => {
-      // Program Filter
-      if (programFilter !== "ALL" && s.program !== programFilter) return false;
+  // ============================================================
+  // FILTER STUDENTS
+  // ============================================================
 
-      // Status Filter
-      if (statusFilter !== "ALL") {
-        if (statusFilter === "paid" && s.status !== "paid") return false;
-        if (statusFilter === "pending" && s.status !== "pending" && s.status !== "partial") return false;
+  const filteredStudents =
+    useMemo(() => {
+      return students.filter(
+        (student) => {
+          // Program
+          if (
+            programFilter !== "ALL" &&
+            student.program !==
+              programFilter
+          ) {
+            return false;
+          }
+
+          // Status
+          if (
+            statusFilter !== "ALL"
+          ) {
+            if (
+              statusFilter ===
+                "paid" &&
+              student.status !==
+                "paid"
+            ) {
+              return false;
+            }
+
+            if (
+              statusFilter ===
+                "pending" &&
+              student.status !==
+                "pending" &&
+              student.status !==
+                "partial"
+            ) {
+              return false;
+            }
+          }
+
+          // Search
+          if (
+            searchTerm.trim()
+          ) {
+            const term =
+              searchTerm
+                .toLowerCase()
+                .trim();
+
+            const matchesStudent =
+              student.studentId
+                .toLowerCase()
+                .includes(term) ||
+              student.name
+                .toLowerCase()
+                .includes(term) ||
+              student.mobile
+                .toLowerCase()
+                .includes(term);
+
+            const matchesPayment =
+              payments.some(
+                (payment) => {
+                  if (
+                    payment.studentId
+                      .toLowerCase() !==
+                    student.studentId
+                      .toLowerCase()
+                  ) {
+                    return false;
+                  }
+
+                  return (
+                    payment.transactionId
+                      ?.toLowerCase()
+                      .includes(
+                        term
+                      ) ||
+                    payment.paymentId
+                      ?.toLowerCase()
+                      .includes(
+                        term
+                      ) ||
+                    payment.razorpayPaymentId
+                      ?.toLowerCase()
+                      .includes(
+                        term
+                      ) ||
+                    payment.receiptNumber
+                      ?.toLowerCase()
+                      .includes(
+                        term
+                      )
+                  );
+                }
+              );
+
+            return (
+              matchesStudent ||
+              matchesPayment
+            );
+          }
+
+          return true;
+        }
+      );
+    }, [
+      students,
+      payments,
+      searchTerm,
+      statusFilter,
+      programFilter,
+    ]);
+
+  // ============================================================
+  // SELECTED STUDENT PAYMENTS
+  // ============================================================
+
+  const selectedStudentPayments =
+    useMemo(() => {
+      if (
+        !selectedStudentDetails
+      ) {
+        return [];
       }
 
-      // Search Filter
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const matchId = s.studentId.toLowerCase().includes(term);
-        const matchName = s.name.toLowerCase().includes(term);
-        const matchMobile = s.mobile.toLowerCase().includes(term);
+      return payments.filter(
+        (payment) =>
+          payment.studentId
+            .toLowerCase() ===
+          selectedStudentDetails.studentId
+            .toLowerCase()
+      );
+    }, [
+      payments,
+      selectedStudentDetails,
+    ]);
 
-        // Check matching payment transactions for this student
-        const matchTxn = payments.some(
-          (p) =>
-            p.studentId === s.studentId &&
-            (p.transactionId.toLowerCase().includes(term) ||
-              (p.razorpayPaymentId && p.razorpayPaymentId.toLowerCase().includes(term)) ||
-              (p.applicationNo && p.applicationNo.toLowerCase().includes(term)))
-        );
-
-        return matchId || matchName || matchMobile || matchTxn;
-      }
-
-      return true;
-    });
-  }, [students, payments, searchTerm, statusFilter, programFilter]);
-
-  // Filtered Payment History for View Details
-  const selectedStudentPayments = useMemo(() => {
-    if (!selectedStudentDetails) return [];
-    return payments.filter(
-      (p) => p.studentId.toLowerCase() === selectedStudentDetails.studentId.toLowerCase()
-    );
-  }, [payments, selectedStudentDetails]);
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8">
-      {/* HEADER & TOP NAV */}
+
+      {/* ====================================================== */}
+      {/* HEADER */}
+      {/* ====================================================== */}
+
       <header className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+
           <div>
             <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-              <Link href="/admin" className="hover:text-[#0057B8] transition font-medium">
+              <Link
+                href="/admin/dashboard"
+                className="hover:text-[#0057B8] transition font-medium"
+              >
                 ← Back to Dashboard
               </Link>
+
               <span>/</span>
-              <span className="text-slate-800 font-semibold">Fees &amp; Payments</span>
+
+              <span className="text-slate-800 font-semibold">
+                Fees &amp; Payments
+              </span>
             </div>
+
             <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
               Fees &amp; Payments Management
             </h1>
+
             <p className="text-slate-600 text-sm mt-1">
-              Monitor student fee collection, review online Razorpay transactions, and record manual offline receipts.
+              Manage student fee collection,
+              Razorpay transactions and
+              offline payments from one place.
             </p>
           </div>
 
           <button
-            onClick={() => handleOpenRecordModal()}
-            className="inline-flex items-center justify-center bg-[#0057B8] hover:bg-[#004494] text-white px-5 py-2.5 rounded-xl font-semibold shadow-md shadow-blue-500/10 transition cursor-pointer text-sm"
+            onClick={() =>
+              handleOpenRecordModal()
+            }
+            className="inline-flex items-center justify-center bg-[#0057B8] hover:bg-[#004494] text-white px-5 py-2.5 rounded-xl font-semibold shadow-md transition cursor-pointer text-sm"
           >
-            <span className="mr-2 text-lg font-bold">+</span> Record Payment
+            <span className="mr-2 text-lg font-bold">
+              +
+            </span>
+
+            Record Payment
           </button>
         </div>
 
-        {/* NAVIGATION LINKS */}
+        {/* NAVIGATION */}
+
         <nav className="flex flex-wrap gap-2 pt-2 border-t border-slate-200/80 text-xs sm:text-sm font-medium">
+
           <Link
             href="/admin/students"
             className="px-3 py-1.5 rounded-lg text-slate-600 hover:text-[#0057B8] hover:bg-slate-100 transition"
           >
             Students
           </Link>
+
           <Link
             href="/admin/admissions"
             className="px-3 py-1.5 rounded-lg text-slate-600 hover:text-[#0057B8] hover:bg-slate-100 transition"
           >
             Admissions
           </Link>
+
           <Link
             href="/admin/courses"
             className="px-3 py-1.5 rounded-lg text-slate-600 hover:text-[#0057B8] hover:bg-slate-100 transition"
           >
             Courses
           </Link>
+
           <Link
             href="/admin/batches"
             className="px-3 py-1.5 rounded-lg text-slate-600 hover:text-[#0057B8] hover:bg-slate-100 transition"
           >
             Batches
           </Link>
+
           <Link
             href="/admin/attendance"
             className="px-3 py-1.5 rounded-lg text-slate-600 hover:text-[#0057B8] hover:bg-slate-100 transition"
           >
             Attendance
           </Link>
+
           <Link
             href="/admin/fees"
             className="px-3 py-1.5 rounded-lg bg-[#0057B8] text-white font-semibold shadow-sm"
@@ -602,61 +1210,124 @@ export default function FeesAndPaymentsPage() {
         </nav>
       </header>
 
-      {/* ERROR BANNER */}
+      {/* ====================================================== */}
+      {/* ERROR */}
+      {/* ====================================================== */}
+
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl flex items-center justify-between gap-3">
+
           <div className="flex items-center gap-3">
-            <span className="text-xl">⚠️</span>
-            <p className="text-sm font-medium">{error}</p>
+            <span className="text-xl">
+              ⚠️
+            </span>
+
+            <p className="text-sm font-medium">
+              {error}
+            </p>
           </div>
+
           <button
             onClick={fetchFeeData}
             className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold"
           >
-            Retry Loading
+            Retry
           </button>
         </div>
       )}
 
-      {/* STATS OVERVIEW CARDS */}
+      {/* ====================================================== */}
+      {/* STATISTICS */}
+      {/* ====================================================== */}
+
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Fees Billed</p>
-          <p className="text-2xl font-extrabold text-slate-900 mt-1">{formatINR(stats.totalFees)}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Expected revenue</span>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Total Fees Billed
+          </p>
+
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">
+            {formatINR(
+              stats.totalFees
+            )}
+          </p>
+
+          <span className="text-[11px] text-slate-500 mt-1 block">
+            Expected revenue
+          </span>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-emerald-500">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Collected</p>
-          <p className="text-2xl font-extrabold text-emerald-600 mt-1">{formatINR(stats.totalCollected)}</p>
-          <span className="text-[11px] text-emerald-700/80 font-medium mt-1 block">Verified successful receipts</span>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Total Collected
+          </p>
+
+          <p className="text-2xl font-extrabold text-emerald-600 mt-1">
+            {formatINR(
+              stats.totalCollected
+            )}
+          </p>
+
+          <span className="text-[11px] text-emerald-700/80 font-medium mt-1 block">
+            Completed payments
+          </span>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-amber-500">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Pending</p>
-          <p className="text-2xl font-extrabold text-amber-600 mt-1">{formatINR(stats.totalPending)}</p>
-          <span className="text-[11px] text-amber-700/80 font-medium mt-1 block">Outstanding balances</span>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Total Pending
+          </p>
+
+          <p className="text-2xl font-extrabold text-amber-600 mt-1">
+            {formatINR(
+              stats.totalPending
+            )}
+          </p>
+
+          <span className="text-[11px] text-amber-700/80 font-medium mt-1 block">
+            Outstanding balances
+          </span>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-[#0057B8]">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Transactions</p>
-          <p className="text-2xl font-extrabold text-[#0057B8] mt-1">{stats.totalTransactions}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Online &amp; offline records</span>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Transactions
+          </p>
+
+          <p className="text-2xl font-extrabold text-[#0057B8] mt-1">
+            {stats.totalTransactions}
+          </p>
+
+          <span className="text-[11px] text-slate-500 mt-1 block">
+            Online &amp; offline records
+          </span>
         </div>
+
       </section>
 
-      {/* FILTER & SEARCH BAR */}
+      {/* ====================================================== */}
+      {/* FILTERS */}
+      {/* ====================================================== */}
+
       <section className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 mb-6">
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-          {/* Search Box */}
+
           <div className="md:col-span-2 relative">
+
             <input
               type="text"
-              placeholder="Search by Student ID, Name, Mobile, Txn ID, or Razorpay ID..."
+              placeholder="Search Student ID, Name, Mobile, Transaction ID, Receipt..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) =>
+                setSearchTerm(
+                  e.target.value
+                )
+              }
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0057B8] text-sm text-slate-800 placeholder-slate-400"
             />
+
             <svg
               className="w-5 h-5 absolute left-3 top-3 text-slate-400"
               fill="none"
@@ -670,34 +1341,58 @@ export default function FeesAndPaymentsPage() {
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
+
           </div>
 
-          {/* Program Filter */}
           <div>
             <select
               value={programFilter}
-              onChange={(e) => setProgramFilter(e.target.value)}
+              onChange={(e) =>
+                setProgramFilter(
+                  e.target.value
+                )
+              }
               className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0057B8] text-sm text-slate-800 bg-white"
             >
-              <option value="ALL">All Programs / Courses</option>
-              {programOptions.map((prog) => (
-                <option key={prog} value={prog}>
-                  {prog}
-                </option>
-              ))}
+              <option value="ALL">
+                All Programs / Courses
+              </option>
+
+              {programOptions.map(
+                (program) => (
+                  <option
+                    key={program}
+                    value={program}
+                  >
+                    {program}
+                  </option>
+                )
+              )}
             </select>
           </div>
 
-          {/* Status Filter & Refresh */}
           <div className="flex gap-2">
+
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) =>
+                setStatusFilter(
+                  e.target.value
+                )
+              }
               className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0057B8] text-sm text-slate-800 bg-white"
             >
-              <option value="ALL">All Fee Status</option>
-              <option value="paid">Fully Paid</option>
-              <option value="pending">Pending / Partial</option>
+              <option value="ALL">
+                All Fee Status
+              </option>
+
+              <option value="paid">
+                Fully Paid
+              </option>
+
+              <option value="pending">
+                Pending / Partial
+              </option>
             </select>
 
             <button
@@ -705,161 +1400,263 @@ export default function FeesAndPaymentsPage() {
               title="Refresh Data"
               className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl text-slate-700 transition"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
+              ↻
             </button>
+
           </div>
+
         </div>
       </section>
 
-      {/* MAIN DATA TABLE */}
+      {/* ====================================================== */}
+      {/* TABLE */}
+      {/* ====================================================== */}
+
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="w-10 h-10 border-4 border-[#0057B8] border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-slate-500 text-sm font-medium">Synchronizing Fee Records &amp; Payment Transactions...</p>
+
+          <div className="w-10 h-10 border-4 border-[#0057B8] border-t-transparent rounded-full animate-spin mb-4" />
+
+          <p className="text-slate-500 text-sm font-medium">
+            Synchronizing fee records...
+          </p>
+
         </div>
       ) : filteredStudents.length === 0 ? (
+
         <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 shadow-sm">
-          <div className="w-16 h-16 bg-blue-50 text-[#0057B8] rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+
+          <div className="w-16 h-16 bg-blue-50 text-[#0057B8] rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
             💳
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-1">No Fee Records Found</h3>
-          <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-            {searchTerm || statusFilter !== "ALL" || programFilter !== "ALL"
-              ? "No student records match your active search and filter criteria."
+
+          <h3 className="text-lg font-bold text-slate-800 mb-1">
+            No Fee Records Found
+          </h3>
+
+          <p className="text-slate-500 text-sm max-w-md mx-auto">
+            {searchTerm ||
+            statusFilter !== "ALL" ||
+            programFilter !== "ALL"
+              ? "No student records match the selected filters."
               : "No student records are currently available in Firestore."}
           </p>
-          {(searchTerm || statusFilter !== "ALL" || programFilter !== "ALL") && (
-            <button
-              onClick={() => {
-                setSearchTerm("");
-                setStatusFilter("ALL");
-                setProgramFilter("ALL");
-              }}
-              className="text-xs font-semibold text-[#0057B8] underline"
-            >
-              Reset All Filters
-            </button>
-          )}
+
         </div>
       ) : (
+
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
           <div className="overflow-x-auto">
+
             <table className="w-full text-left border-collapse text-xs sm:text-sm">
+
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px] tracking-wider">
-                  <th className="p-4">Student Info</th>
-                  <th className="p-4">Program / Course</th>
-                  <th className="p-4">Total Fee</th>
-                  <th className="p-4">Paid Fee</th>
-                  <th className="p-4">Pending Fee</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Actions</th>
+
+                  <th className="p-4">
+                    Student Info
+                  </th>
+
+                  <th className="p-4">
+                    Program / Course
+                  </th>
+
+                  <th className="p-4">
+                    Total Fee
+                  </th>
+
+                  <th className="p-4">
+                    Paid Fee
+                  </th>
+
+                  <th className="p-4">
+                    Pending Fee
+                  </th>
+
+                  <th className="p-4">
+                    Status
+                  </th>
+
+                  <th className="p-4 text-right">
+                    Actions
+                  </th>
+
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-slate-100">
-                {filteredStudents.map((st) => {
-                  return (
-                    <tr key={st.id} className="hover:bg-slate-50/80 transition">
-                      {/* Student Info */}
+
+                {filteredStudents.map(
+                  (student) => (
+                    <tr
+                      key={student.id}
+                      className="hover:bg-slate-50/80 transition"
+                    >
+
                       <td className="p-4">
-                        <div className="font-bold text-slate-900">{st.name}</div>
-                        <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                          <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 text-[10px]">
-                            {st.studentId}
-                          </span>
-                          <span>• {st.mobile}</span>
+
+                        <div className="font-bold text-slate-900">
+                          {student.name}
                         </div>
+
+                        <div className="text-xs text-slate-500 flex items-center gap-2 mt-1">
+
+                          <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 text-[10px]">
+                            {student.studentId}
+                          </span>
+
+                          <span>
+                            • {student.mobile}
+                          </span>
+
+                        </div>
+
+                        {!student.enrollmentId && (
+                          <div className="mt-1 text-[10px] font-semibold text-red-600">
+                            ⚠ Enrollment missing
+                          </div>
+                        )}
+
                       </td>
 
-                      {/* Program */}
                       <td className="p-4 text-slate-700 font-medium">
-                        {st.program}
-                        <div className="text-[11px] text-slate-400 font-normal">{st.academicClass}</div>
+
+                        {student.program}
+
+                        <div className="text-[11px] text-slate-400 font-normal">
+                          {student.academicClass}
+                        </div>
+
                       </td>
 
-                      {/* Total Fee */}
-                      <td className="p-4 font-semibold text-slate-900">{formatINR(st.totalFee)}</td>
+                      <td className="p-4 font-semibold text-slate-900">
+                        {formatINR(
+                          student.totalFee
+                        )}
+                      </td>
 
-                      {/* Paid Fee */}
-                      <td className="p-4 font-semibold text-emerald-600">{formatINR(st.paidFee)}</td>
+                      <td className="p-4 font-semibold text-emerald-600">
+                        {formatINR(
+                          student.paidFee
+                        )}
+                      </td>
 
-                      {/* Pending Fee */}
                       <td className="p-4 font-semibold text-amber-600">
-                        {formatINR(st.pendingFee)}
+                        {formatINR(
+                          student.pendingFee
+                        )}
                       </td>
 
-                      {/* Status */}
                       <td className="p-4">
+
                         <span
                           className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-extrabold capitalize ${
-                            st.status === "paid"
+                            student.status ===
+                            "paid"
                               ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : st.status === "partial"
+                              : student.status ===
+                                "partial"
                               ? "bg-amber-50 text-amber-700 border border-amber-200"
                               : "bg-red-50 text-red-700 border border-red-200"
                           }`}
                         >
-                          {st.status === "paid"
+                          {student.status ===
+                          "paid"
                             ? "Paid"
-                            : st.status === "partial"
+                            : student.status ===
+                              "partial"
                             ? "Partial"
                             : "Pending"}
                         </span>
+
                       </td>
 
-                      {/* Actions */}
                       <td className="p-4 text-right">
+
                         <div className="flex items-center justify-end gap-2">
+
                           <button
                             onClick={() => {
-                              setSelectedStudentDetails(st);
-                              setIsDetailsModalOpen(true);
+                              setSelectedStudentDetails(
+                                student
+                              );
+
+                              setIsDetailsModalOpen(
+                                true
+                              );
                             }}
                             className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
                           >
                             View Details
                           </button>
 
-                          {st.pendingFee > 0 && (
+                          {student.pendingFee >
+                            0 && (
                             <button
-                              onClick={() => handleOpenRecordModal(st)}
-                              className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0057B8] hover:bg-[#004494] rounded-lg transition"
+                              onClick={() =>
+                                handleOpenRecordModal(
+                                  student
+                                )
+                              }
+                              disabled={
+                                !student.enrollmentId
+                              }
+                              className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0057B8] hover:bg-[#004494] rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               Collect Fee
                             </button>
                           )}
+
                         </div>
+
                       </td>
+
                     </tr>
-                  );
-                })}
+                  )
+                )}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
       )}
 
-      {/* ========================================== */}
-      {/* MODAL 1: RECORD PAYMENT FORM               */}
-      {/* ========================================== */}
+      {/* ====================================================== */}
+      {/* RECORD PAYMENT MODAL */}
+      {/* ====================================================== */}
+
       {isRecordModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full p-6 my-8">
+
             <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-900">Record Offline Payment</h2>
+
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Record Payment
+                </h2>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Secure admin payment entry
+                </p>
+              </div>
+
               <button
-                onClick={() => setIsRecordModalOpen(false)}
+                onClick={() =>
+                  setIsRecordModalOpen(
+                    false
+                  )
+                }
                 className="text-slate-400 hover:text-slate-600 text-lg font-bold"
               >
                 ✕
               </button>
+
             </div>
 
             {formError && (
@@ -868,263 +1665,515 @@ export default function FeesAndPaymentsPage() {
               </div>
             )}
 
-            <form onSubmit={handleRecordPaymentSubmit} className="space-y-4 text-xs">
-              {/* Student ID Lookup */}
+            <form
+              onSubmit={
+                handleRecordPaymentSubmit
+              }
+              className="space-y-4 text-xs"
+            >
+
+              {/* STUDENT */}
+
               <div>
+
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Student ID <span className="text-red-500">*</span>
+                  Student ID{" "}
+                  <span className="text-red-500">
+                    *
+                  </span>
                 </label>
+
                 <input
                   type="text"
                   required
-                  placeholder="Enter exact Student ID (e.g. STU-1001)"
-                  value={paymentFormData.studentId}
-                  onChange={(e) => handleStudentIdChange(e.target.value)}
+                  placeholder="Enter Student ID"
+                  value={
+                    paymentFormData.studentId
+                  }
+                  onChange={(e) =>
+                    handleStudentIdChange(
+                      e.target.value
+                    )
+                  }
                   className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm font-mono"
                 />
 
                 {studentLookupError && (
-                  <p className="text-red-500 text-[11px] mt-1 font-medium">{studentLookupError}</p>
+                  <p className="text-red-500 text-[11px] mt-1 font-medium">
+                    {studentLookupError}
+                  </p>
                 )}
 
                 {selectedStudentForPayment && (
-                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 flex justify-between items-center">
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl flex justify-between items-center">
+
                     <div>
-                      <p className="font-bold text-sm">{selectedStudentForPayment.name}</p>
+                      <p className="font-bold text-sm text-blue-900">
+                        {
+                          selectedStudentForPayment.name
+                        }
+                      </p>
+
                       <p className="text-[11px] text-blue-700">
-                        {selectedStudentForPayment.program} • Mobile: {selectedStudentForPayment.mobile}
+                        {
+                          selectedStudentForPayment.program
+                        }
+                      </p>
+
+                      <p className="text-[10px] text-blue-600 mt-1">
+                        Enrollment:{" "}
+                        {
+                          selectedStudentForPayment.enrollmentId
+                        }
                       </p>
                     </div>
+
                     <div className="text-right">
-                      <span className="text-[10px] text-blue-600 block uppercase font-bold">Pending</span>
-                      <span className="font-extrabold text-sm text-amber-700">
-                        {formatINR(selectedStudentForPayment.pendingFee)}
+
+                      <span className="text-[10px] text-blue-600 block uppercase font-bold">
+                        Pending
                       </span>
+
+                      <span className="font-extrabold text-sm text-amber-700">
+                        {formatINR(
+                          selectedStudentForPayment.pendingFee
+                        )}
+                      </span>
+
                     </div>
+
                   </div>
                 )}
+
               </div>
 
-              {/* Amount & Method */}
+              {/* AMOUNT + METHOD */}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
                 <div>
+
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Payment Amount (₹) <span className="text-red-500">*</span>
+                    Payment Amount (₹){" "}
+                    <span className="text-red-500">
+                      *
+                    </span>
                   </label>
+
                   <input
                     type="number"
                     required
                     min="1"
-                    placeholder="e.g. 5000"
-                    value={paymentFormData.amount}
-                    onChange={(e) =>
-                      setPaymentFormData({ ...paymentFormData, amount: e.target.value })
+                    max={
+                      selectedStudentForPayment?.pendingFee ||
+                      undefined
                     }
-                    className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm font-bold text-slate-900"
+                    value={
+                      paymentFormData.amount
+                    }
+                    onChange={(e) =>
+                      setPaymentFormData(
+                        (prev) => ({
+                          ...prev,
+                          amount:
+                            e.target.value,
+                        })
+                      )
+                    }
+                    className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm font-bold"
                   />
+
                 </div>
 
                 <div>
+
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Payment Method <span className="text-red-500">*</span>
+                    Payment Method{" "}
+                    <span className="text-red-500">
+                      *
+                    </span>
                   </label>
+
                   <select
-                    value={paymentFormData.paymentMethod}
+                    value={
+                      paymentFormData.paymentMethod
+                    }
                     onChange={(e) =>
-                      setPaymentFormData({
-                        ...paymentFormData,
-                        paymentMethod: e.target.value as any,
-                      })
+                      setPaymentFormData(
+                        (prev) => ({
+                          ...prev,
+                          paymentMethod:
+                            e.target
+                              .value as RecordPaymentFormData["paymentMethod"],
+                        })
+                      )
                     }
                     className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm bg-white"
                   >
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI / GPay / PhonePe</option>
-                    <option value="bank_transfer">Bank Transfer / NEFT / IMPS</option>
-                    <option value="card">Debit / Credit Card</option>
-                    <option value="other">Other</option>
+                    <option value="cash">
+                      Cash
+                    </option>
+
+                    <option value="upi">
+                      UPI / GPay / PhonePe
+                    </option>
+
+                    <option value="bank_transfer">
+                      Bank Transfer / NEFT / IMPS
+                    </option>
+
+                    <option value="online">
+                      Online
+                    </option>
                   </select>
+
                 </div>
+
               </div>
 
-              {/* Transaction ID & Date */}
+              {/* TRANSACTION + DATE */}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
                 <div>
+
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Transaction ID / Receipt No. <span className="text-red-500">*</span>
+                    Transaction / Receipt Reference{" "}
+                    <span className="text-red-500">
+                      *
+                    </span>
                   </label>
+
                   <input
                     type="text"
                     required
-                    value={paymentFormData.transactionId}
+                    value={
+                      paymentFormData.transactionId
+                    }
                     onChange={(e) =>
-                      setPaymentFormData({ ...paymentFormData, transactionId: e.target.value })
+                      setPaymentFormData(
+                        (prev) => ({
+                          ...prev,
+                          transactionId:
+                            e.target
+                              .value,
+                        })
+                      )
                     }
                     className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm font-mono"
                   />
+
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Payment Date</label>
+
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Payment Date
+                  </label>
+
                   <input
                     type="date"
                     required
-                    value={paymentFormData.paymentDate}
+                    value={
+                      paymentFormData.paymentDate
+                    }
                     onChange={(e) =>
-                      setPaymentFormData({ ...paymentFormData, paymentDate: e.target.value })
+                      setPaymentFormData(
+                        (prev) => ({
+                          ...prev,
+                          paymentDate:
+                            e.target
+                              .value,
+                        })
+                      )
                     }
                     className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm"
                   />
+
                 </div>
+
               </div>
 
-              {/* Remarks */}
+              {/* NOTES */}
+
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Remarks / Notes</label>
+
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Notes
+                </label>
+
                 <textarea
                   rows={2}
                   placeholder="Optional payment notes..."
-                  value={paymentFormData.remarks}
+                  value={
+                    paymentFormData.notes
+                  }
                   onChange={(e) =>
-                    setPaymentFormData({ ...paymentFormData, remarks: e.target.value })
+                    setPaymentFormData(
+                      (prev) => ({
+                        ...prev,
+                        notes:
+                          e.target
+                            .value,
+                      })
+                    )
                   }
                   className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0057B8] outline-none text-sm"
-                ></textarea>
+                />
+
               </div>
 
-              {/* Action Buttons */}
+              {/* BUTTONS */}
+
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
+
                 <button
                   type="button"
-                  onClick={() => setIsRecordModalOpen(false)}
+                  onClick={() =>
+                    setIsRecordModalOpen(
+                      false
+                    )
+                  }
                   className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-semibold hover:bg-slate-50 transition"
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
-                  disabled={isSubmitting || !selectedStudentForPayment}
+                  disabled={
+                    isSubmitting ||
+                    !selectedStudentForPayment ||
+                    !selectedStudentForPayment.enrollmentId
+                  }
                   className="px-5 py-2 bg-[#0057B8] text-white font-semibold rounded-xl hover:bg-[#004494] shadow-md transition disabled:opacity-50"
                 >
-                  {isSubmitting ? "Recording..." : "Save Payment"}
+                  {isSubmitting
+                    ? "Recording..."
+                    : "Save Payment"}
                 </button>
+
               </div>
+
             </form>
+
           </div>
+
         </div>
       )}
 
-      {/* ========================================== */}
-      {/* MODAL 2: VIEW DETAILS & PAYMENT HISTORY    */}
-      {/* ========================================== */}
-      {isDetailsModalOpen && selectedStudentDetails && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full p-6 my-8">
-            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-50 text-[#0057B8] font-mono">
-                  {selectedStudentDetails.studentId}
-                </span>
-                <h2 className="text-xl font-bold text-slate-900 mt-1">
-                  {selectedStudentDetails.name}
-                </h2>
+      {/* ====================================================== */}
+      {/* DETAILS MODAL */}
+      {/* ====================================================== */}
+
+      {isDetailsModalOpen &&
+        selectedStudentDetails && (
+          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full p-6 my-8">
+
+              <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+
+                <div>
+
+                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-50 text-[#0057B8] font-mono">
+                    {
+                      selectedStudentDetails.studentId
+                    }
+                  </span>
+
+                  <h2 className="text-xl font-bold text-slate-900 mt-1">
+                    {
+                      selectedStudentDetails.name
+                    }
+                  </h2>
+
+                </div>
+
+                <button
+                  onClick={() =>
+                    setIsDetailsModalOpen(
+                      false
+                    )
+                  }
+                  className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+                >
+                  ✕
+                </button>
+
               </div>
-              <button
-                onClick={() => setIsDetailsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
-              >
-                ✕
-              </button>
-            </div>
 
-            {/* Fee Summary Cards */}
-            <div className="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6 text-center text-xs">
-              <div>
-                <p className="text-slate-400 font-semibold uppercase text-[10px]">Total Billed</p>
-                <p className="text-base font-extrabold text-slate-900 mt-0.5">
-                  {formatINR(selectedStudentDetails.totalFee)}
-                </p>
+              {/* SUMMARY */}
+
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6 text-center text-xs">
+
+                <div>
+                  <p className="text-slate-400 font-semibold uppercase text-[10px]">
+                    Total Billed
+                  </p>
+
+                  <p className="text-base font-extrabold text-slate-900 mt-0.5">
+                    {formatINR(
+                      selectedStudentDetails.totalFee
+                    )}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-slate-400 font-semibold uppercase text-[10px]">
+                    Total Paid
+                  </p>
+
+                  <p className="text-base font-extrabold text-emerald-600 mt-0.5">
+                    {formatINR(
+                      selectedStudentDetails.paidFee
+                    )}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-slate-400 font-semibold uppercase text-[10px]">
+                    Pending Balance
+                  </p>
+
+                  <p className="text-base font-extrabold text-amber-600 mt-0.5">
+                    {formatINR(
+                      selectedStudentDetails.pendingFee
+                    )}
+                  </p>
+                </div>
+
               </div>
-              <div>
-                <p className="text-slate-400 font-semibold uppercase text-[10px]">Total Paid</p>
-                <p className="text-base font-extrabold text-emerald-600 mt-0.5">
-                  {formatINR(selectedStudentDetails.paidFee)}
-                </p>
-              </div>
-              <div>
-                <p className="text-slate-400 font-semibold uppercase text-[10px]">Pending Balance</p>
-                <p className="text-base font-extrabold text-amber-600 mt-0.5">
-                  {formatINR(selectedStudentDetails.pendingFee)}
-                </p>
-              </div>
-            </div>
 
-            {/* Transaction History List */}
-            <h3 className="font-bold text-slate-800 text-sm mb-3">Transaction History</h3>
+              {/* HISTORY */}
 
-            {selectedStudentPayments.length === 0 ? (
-              <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <p className="text-xs text-slate-500 font-medium">No recorded transactions found for this student.</p>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
-                {selectedStudentPayments.map((p) => {
-                  const isSuccess = isPaymentSuccessful(p.paymentStatus);
-                  return (
-                    <div
-                      key={p.id}
-                      className="p-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between gap-3"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-800">{p.transactionId}</span>
-                          <span className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                            {p.paymentMethod}
-                          </span>
-                        </div>
+              <h3 className="font-bold text-slate-800 text-sm mb-3">
+                Transaction History
+              </h3>
 
-                        <p className="text-slate-500 text-[11px] mt-1">
-                          Date: {p.paymentDate} {p.remarks && `• ${p.remarks}`}
-                        </p>
+              {selectedStudentPayments.length ===
+              0 ? (
+                <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <p className="text-xs text-slate-500 font-medium">
+                    No recorded transactions found.
+                  </p>
+                </div>
+              ) : (
 
-                        {p.razorpayPaymentId && (
-                          <p className="text-[10px] font-mono text-blue-600 mt-0.5">
-                            Razorpay ID: {p.razorpayPaymentId}
-                          </p>
-                        )}
-                      </div>
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1 text-xs">
 
-                      <div className="text-right">
-                        <span className="font-extrabold text-sm text-slate-900 block">
-                          {formatINR(p.amount)}
-                        </span>
-                        <span
-                          className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded capitalize mt-0.5 ${
-                            isSuccess
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-red-50 text-red-700"
-                          }`}
+                  {selectedStudentPayments.map(
+                    (payment) => {
+                      const successful =
+                        isPaymentSuccessful(
+                          payment.paymentStatus
+                        );
+
+                      return (
+                        <div
+                          key={payment.id}
+                          className="p-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between gap-3"
                         >
-                          {p.paymentStatus}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
-            <div className="mt-6 pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setIsDetailsModalOpen(false)}
-                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition"
-              >
-                Close
-              </button>
+                          <div>
+
+                            <div className="flex items-center gap-2 flex-wrap">
+
+                              <span className="font-mono font-bold text-slate-800">
+                                {payment.transactionId ||
+                                  payment.paymentId}
+                              </span>
+
+                              <span className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                                {
+                                  payment.paymentMethod
+                                }
+                              </span>
+
+                              {payment.receiptNumber && (
+                                <span className="text-[9px] font-bold text-blue-600">
+                                  {
+                                    payment.receiptNumber
+                                  }
+                                </span>
+                              )}
+
+                            </div>
+
+                            <p className="text-slate-500 text-[11px] mt-1">
+                              Date:{" "}
+                              {
+                                payment.paymentDate
+                              }
+
+                              {payment.notes &&
+                                ` • ${payment.notes}`}
+                            </p>
+
+                            {payment.razorpayPaymentId && (
+                              <p className="text-[10px] font-mono text-blue-600 mt-0.5">
+                                Razorpay ID:{" "}
+                                {
+                                  payment.razorpayPaymentId
+                                }
+                              </p>
+                            )}
+
+                          </div>
+
+                          <div className="text-right">
+
+                            <span className="font-extrabold text-sm text-slate-900 block">
+                              {formatINR(
+                                payment.amount
+                              )}
+                            </span>
+
+                            <span
+                              className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded capitalize mt-0.5 ${
+                                successful
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : payment.paymentStatus ===
+                                    "pending"
+                                  ? "bg-amber-50 text-amber-700"
+                                  : "bg-red-50 text-red-700"
+                              }`}
+                            >
+                              {
+                                payment.paymentStatus
+                              }
+                            </span>
+
+                          </div>
+
+                        </div>
+                      );
+                    }
+                  )}
+
+                </div>
+              )}
+
+              <div className="mt-6 pt-3 border-t border-slate-100 flex justify-end">
+
+                <button
+                  onClick={() =>
+                    setIsDetailsModalOpen(
+                      false
+                    )
+                  }
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition"
+                >
+                  Close
+                </button>
+
+              </div>
+
             </div>
+
           </div>
-        </div>
-      )}
+        )}
+
     </div>
   );
 }

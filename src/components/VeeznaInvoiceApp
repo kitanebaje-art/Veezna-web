@@ -1,0 +1,622 @@
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+
+// Interfaces
+interface InvoiceItem {
+  id: string;
+  description: string;
+  category: 'Academic' | 'Wellness' | 'Material' | 'Other';
+  quantity: number;
+  rate: number;
+  amount: number;
+}
+
+interface InvoiceData {
+  invoiceNumber: string;
+  date: string;
+  dueDate: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  customerAddress: string;
+  items: InvoiceItem[];
+  discountType: 'percentage' | 'flat';
+  discountValue: number;
+  taxRate: number;
+  paymentMode: 'UPI' | 'Cash' | 'Bank Transfer' | 'Card';
+  paymentStatus: 'PAID' | 'PENDING' | 'PARTIAL';
+  notes: string;
+  googleSheetWebhookUrl: string;
+}
+
+export default function VeeznaInvoiceApp() {
+  const invoiceRef = useRef<HTMLDivElement>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ success?: boolean; message?: string } | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Initialize Default State
+  const [data, setData] = useState<InvoiceData>({
+    invoiceNumber: `VZ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    date: new Date().toISOString().split('T')[0],
+    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    customerName: '',
+    customerPhone: '',
+    customerEmail: '',
+    customerAddress: '',
+    items: [
+      {
+        id: '1',
+        description: 'Veezna Academic Mentorship / Course Module',
+        category: 'Academic',
+        quantity: 1,
+        rate: 3500,
+        amount: 3500,
+      },
+    ],
+    discountType: 'flat',
+    discountValue: 0,
+    taxRate: 0,
+    paymentMode: 'UPI',
+    paymentStatus: 'PAID',
+    notes: 'Thank you for choosing Veezna for your learning and wellness journey!',
+    googleSheetWebhookUrl: '', // Enter your deployed Google Apps Script URL here
+  });
+
+  // Calculate Totals
+  const subtotal = data.items.reduce((acc, item) => acc + (item.quantity * item.rate), 0);
+  const discountAmount = data.discountType === 'percentage' 
+    ? (subtotal * data.discountValue) / 100 
+    : data.discountValue;
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
+  const taxAmount = (taxableAmount * data.taxRate) / 100;
+  const grandTotal = Math.round(taxableAmount + taxAmount);
+
+  // Item Handlers
+  const handleItemChange = (id: string, field: keyof InvoiceItem, value: any) => {
+    setData((prev) => {
+      const newItems = prev.items.map((item) => {
+        if (item.id === id) {
+          const updated = { ...item, [field]: value };
+          if (field === 'quantity' || field === 'rate') {
+            updated.amount = Number(updated.quantity || 0) * Number(updated.rate || 0);
+          }
+          return updated;
+        }
+        return item;
+      });
+      return { ...prev, items: newItems };
+    });
+  };
+
+  const addItem = () => {
+    setData((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          id: Math.random().toString(),
+          description: '',
+          category: 'Academic',
+          quantity: 1,
+          rate: 0,
+          amount: 0,
+        },
+      ],
+    }));
+  };
+
+  const removeItem = (id: string) => {
+    if (data.items.length === 1) return;
+    setData((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.id !== id),
+    }));
+  };
+
+  // 1. Google Sheets Sync
+  const syncToGoogleSheet = async () => {
+    if (!data.googleSheetWebhookUrl) {
+      alert('Please enter your Google Apps Script Webhook URL in the settings tab.');
+      return;
+    }
+    if (!data.customerName || !data.customerPhone) {
+      alert('Please fill customer name and phone number before syncing.');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncStatus(null);
+
+    const payload = {
+      invoiceNumber: data.invoiceNumber,
+      date: data.date,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
+      itemsSummary: data.items.map(i => `${i.description} (x${i.quantity})`).join(', '),
+      subtotal,
+      discount: discountAmount,
+      tax: taxAmount,
+      grandTotal,
+      paymentMode: data.paymentMode,
+      paymentStatus: data.paymentStatus,
+    };
+
+    try {
+      await fetch(data.googleSheetWebhookUrl, {
+        method: 'POST',
+        mode: 'no-cors', // Standard for Google Webhook endpoints
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      setSyncStatus({ success: true, message: '✓ Synced to Google Sheet!' });
+    } catch (err) {
+      setSyncStatus({ success: false, message: 'Sync failed. Verify your Webhook URL.' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // 2. Export Image (JPG / JPEG)
+  const exportAsImage = async (format: 'jpeg' | 'png') => {
+    if (!invoiceRef.current) return;
+    setIsExporting(true);
+
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(invoiceRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+
+      const image = canvas.toDataURL(`image/${format}`, 0.95);
+      const link = document.createElement('a');
+      link.href = image;
+      link.download = `${data.invoiceNumber}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      link.click();
+    } catch (error) {
+      console.error('Image export failed:', error);
+      alert('Failed to export image. Ensure all assets are loaded.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // 3. Export PDF
+  const exportAsPDF = async () => {
+    if (!invoiceRef.current) return;
+    setIsExporting(true);
+
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const { jsPDF } = await import('jspdf');
+
+      const canvas = await html2canvas(invoiceRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`${data.invoiceNumber}.pdf`);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Failed to generate PDF.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // 4. Share on WhatsApp
+  const shareOnWhatsApp = () => {
+    const text = `*INVOICE FROM VEEZNA*\n` +
+      `---------------------------\n` +
+      `*Invoice No:* ${data.invoiceNumber}\n` +
+      `*Client:* ${data.customerName}\n` +
+      `*Total Amount:* ₹${grandTotal.toLocaleString('en-IN')}\n` +
+      `*Status:* ${data.paymentStatus}\n` +
+      `*Date:* ${data.date}\n` +
+      `---------------------------\n` +
+      `Thank you for choosing Veezna!`;
+
+    const phone = data.customerPhone.replace(/\D/g, '');
+    const url = phone.length >= 10
+      ? `https://wa.me/91${phone.slice(-10)}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+    window.open(url, '_blank');
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100 text-slate-900 p-3 sm:p-6 lg:p-8 font-sans">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* TOP BAR */}
+        <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#0057B8] flex items-center justify-center text-white font-black text-xl shadow-md">
+              V
+            </div>
+            <div>
+              <h1 className="text-lg sm:text-xl font-black tracking-tight text-slate-800">
+                VEEZNA Invoice Studio
+              </h1>
+              <p className="text-xs text-slate-500 font-medium">
+                Automated billing, sheet sync & instant client exports
+              </p>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center flex-wrap gap-2">
+            <button
+              onClick={syncToGoogleSheet}
+              disabled={isSyncing}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5"
+            >
+              {isSyncing ? 'Syncing...' : '📊 Save to Sheet'}
+            </button>
+            <button
+              onClick={exportAsPDF}
+              disabled={isExporting}
+              className="px-3.5 py-2 bg-[#0057B8] hover:bg-[#00428d] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5"
+            >
+              📄 Download PDF
+            </button>
+            <button
+              onClick={() => exportAsImage('jpeg')}
+              disabled={isExporting}
+              className="px-3.5 py-2 bg-[#F7931E] hover:bg-[#d87b0f] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5"
+            >
+              🖼️ Download JPG
+            </button>
+            <button
+              onClick={shareOnWhatsApp}
+              className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1eb757] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5"
+            >
+              💬 WhatsApp
+            </button>
+          </div>
+        </div>
+
+        {syncStatus && (
+          <div className={`p-3 rounded-xl text-xs font-bold ${syncStatus.success ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+            {syncStatus.message}
+          </div>
+        )}
+
+        {/* MAIN WORKSPACE: EDITOR & LIVE PREVIEW */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* LEFT: CONTROLS / FORM */}
+          <div className="lg:col-span-5 space-y-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="font-extrabold text-sm uppercase tracking-wider text-slate-500 border-b pb-2">
+              Invoice Settings
+            </h2>
+
+            {/* Google Webhook Config */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                Google Apps Script Webhook URL
+              </label>
+              <input
+                type="text"
+                value={data.googleSheetWebhookUrl}
+                onChange={(e) => setData({ ...data, googleSheetWebhookUrl: e.target.value })}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
+              />
+            </div>
+
+            {/* Client Info */}
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-slate-800">Student / Client Details</p>
+              <input
+                type="text"
+                placeholder="Full Name *"
+                value={data.customerName}
+                onChange={(e) => setData({ ...data, customerName: e.target.value })}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Phone No *"
+                  value={data.customerPhone}
+                  onChange={(e) => setData({ ...data, customerPhone: e.target.value })}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                />
+                <input
+                  type="email"
+                  placeholder="Email Address"
+                  value={data.customerEmail}
+                  onChange={(e) => setData({ ...data, customerEmail: e.target.value })}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                />
+              </div>
+              <textarea
+                placeholder="City / Address"
+                rows={2}
+                value={data.customerAddress}
+                onChange={(e) => setData({ ...data, customerAddress: e.target.value })}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none resize-none"
+              />
+            </div>
+
+            {/* Invoice Meta */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">Invoice Number</label>
+                <input
+                  type="text"
+                  value={data.invoiceNumber}
+                  onChange={(e) => setData({ ...data, invoiceNumber: e.target.value })}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">Issue Date</label>
+                <input
+                  type="date"
+                  value={data.date}
+                  onChange={(e) => setData({ ...data, date: e.target.value })}
+                  className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Line Items Builder */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-800">Services & Programs</p>
+                <button
+                  onClick={addItem}
+                  type="button"
+                  className="text-xs font-bold text-[#0057B8] hover:underline"
+                >
+                  + Add Item
+                </button>
+              </div>
+
+              {data.items.map((item, index) => (
+                <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-slate-400">#{index + 1}</span>
+                    <select
+                      value={item.category}
+                      onChange={(e) => handleItemChange(item.id, 'category', e.target.value)}
+                      className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1.5 py-0.5"
+                    >
+                      <option value="Academic">Academic</option>
+                      <option value="Wellness">Wellness</option>
+                      <option value="Material">Material</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    {data.items.length > 1 && (
+                      <button
+                        onClick={() => removeItem(item.id)}
+                        className="text-rose-500 hover:text-rose-700 text-xs font-bold"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Description (e.g. 45 Days Spoken English / Neurotherapy)"
+                    value={item.description}
+                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                    className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg outline-none"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-400">Qty / Sessions</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={(e) => handleItemChange(item.id, 'quantity', Number(e.target.value))}
+                        className="w-full text-xs p-1.5 bg-white border border-slate-200 rounded-lg outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-400">Rate (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={item.rate}
+                        onChange={(e) => handleItemChange(item.id, 'rate', Number(e.target.value))}
+                        className="w-full text-xs p-1.5 bg-white border border-slate-200 rounded-lg outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Discounts & Payment Meta */}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">Discount (₹ Flat)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={data.discountValue}
+                  onChange={(e) => setData({ ...data, discountValue: Number(e.target.value) })}
+                  className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">Payment Status</label>
+                <select
+                  value={data.paymentStatus}
+                  onChange={(e: any) => setData({ ...data, paymentStatus: e.target.value })}
+                  className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold"
+                >
+                  <option value="PAID">PAID</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="PARTIAL">PARTIAL</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: LIVE PREVIEW & RENDER CONTAINER (A4 Print Perfect) */}
+          <div className="lg:col-span-7 overflow-x-auto">
+            <div
+              ref={invoiceRef}
+              className="w-[680px] sm:w-[720px] mx-auto bg-white p-8 rounded-2xl shadow-lg border border-slate-200 text-slate-800 space-y-6"
+              style={{ minHeight: '940px' }}
+            >
+              {/* INVOICE HEADER */}
+              <div className="flex justify-between items-start border-b border-slate-100 pb-6">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-8 h-8 rounded-lg bg-[#0057B8] text-white flex items-center justify-center font-black text-lg">
+                      V
+                    </div>
+                    <span className="text-2xl font-black tracking-tight text-[#002855]">
+                      VEEZNA
+                    </span>
+                  </div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#F7931E]">
+                    Education & Holistic Wellness
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Neemuch, Madhya Pradesh, India<br />
+                    Web: veezna.com | Email: contact@veezna.com
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+                    INVOICE
+                  </h2>
+                  <p className="text-xs font-bold text-[#0057B8] mt-0.5">
+                    {data.invoiceNumber}
+                  </p>
+                  <div className="mt-2 inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                    style={{
+                      backgroundColor: data.paymentStatus === 'PAID' ? '#dcfce7' : '#fee2e2',
+                      color: data.paymentStatus === 'PAID' ? '#15803d' : '#b91c1c',
+                    }}
+                  >
+                    ● {data.paymentStatus}
+                  </div>
+                </div>
+              </div>
+
+              {/* DATES & BILL TO */}
+              <div className="grid grid-cols-2 gap-6 text-xs">
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">
+                    Billed To:
+                  </p>
+                  <p className="font-extrabold text-sm text-slate-900">
+                    {data.customerName || 'Student / Client Name'}
+                  </p>
+                  <p className="text-slate-600 font-medium">{data.customerPhone || '+91 00000 00000'}</p>
+                  {data.customerEmail && <p className="text-slate-500">{data.customerEmail}</p>}
+                  {data.customerAddress && <p className="text-slate-500 mt-0.5">{data.customerAddress}</p>}
+                </div>
+
+                <div className="text-right space-y-1">
+                  <div>
+                    <span className="text-slate-400 font-bold">Issue Date: </span>
+                    <span className="font-bold text-slate-700">{data.date}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold">Due Date: </span>
+                    <span className="font-bold text-slate-700">{data.dueDate}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold">Payment Mode: </span>
+                    <span className="font-bold text-[#0057B8]">{data.paymentMode}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* TABLE */}
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-y-2 border-slate-800 text-slate-800 uppercase text-[10px] font-black tracking-wider">
+                    <th className="py-2.5">Description</th>
+                    <th className="py-2.5 text-center">Category</th>
+                    <th className="py-2.5 text-center">Qty / Sessions</th>
+                    <th className="py-2.5 text-right">Rate</th>
+                    <th className="py-2.5 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {data.items.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="py-3 pr-2 font-bold text-slate-800">
+                        {item.description || 'Program / Service Item'}
+                      </td>
+                      <td className="py-3 text-center text-[10px] text-slate-500 font-semibold">
+                        {item.category}
+                      </td>
+                      <td className="py-3 text-center">{item.quantity}</td>
+                      <td className="py-3 text-right">₹{item.rate.toLocaleString('en-IN')}</td>
+                      <td className="py-3 text-right font-bold text-slate-900">
+                        ₹{(item.quantity * item.rate).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* SUMMARY CALCULATIONS */}
+              <div className="border-t border-slate-200 pt-4 flex justify-between items-start">
+                <div className="w-1/2 text-[11px] text-slate-500 space-y-1">
+                  <p className="font-bold text-slate-700">Terms & Conditions:</p>
+                  <p className="leading-relaxed">{data.notes}</p>
+                </div>
+
+                <div className="w-5/12 space-y-1.5 text-xs text-right">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Subtotal:</span>
+                    <span className="font-semibold">₹{subtotal.toLocaleString('en-IN')}</span>
+                  </div>
+                  {discountAmount > 0 && (
+                    <div className="flex justify-between text-emerald-600 font-semibold">
+                      <span>Discount:</span>
+                      <span>-₹{discountAmount.toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-base font-black text-[#002855] border-t-2 border-slate-800 pt-2 mt-2">
+                    <span>Grand Total:</span>
+                    <span>₹{grandTotal.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* SIGNATURE / FOOTER */}
+              <div className="pt-12 flex justify-between items-end text-[10px] text-slate-400">
+                <div>
+                  <p className="font-bold text-slate-600">Veezna Official Receipt</p>
+                  <p>Computer generated invoice, no physical signature required.</p>
+                </div>
+                <div className="text-center">
+                  <div className="w-32 border-b border-slate-300 mb-1" />
+                  <p className="font-bold text-slate-600">Authorized Signatory</p>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}

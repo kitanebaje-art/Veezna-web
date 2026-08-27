@@ -1,77 +1,113 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "@/lib/firebase";
-import AdminSidebar from "@/components/admin/AdminSidebar";
+import React, { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
 
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
 
-  // Exclude the login page itself from the authentication guard to prevent infinite redirect loops
-  const isLoginPage = pathname === "/admin/login";
+  const isLoginPage = pathname === '/admin/login';
 
   useEffect(() => {
-    // If navigating to the login page, do not enforce auth check
+    // Login page should always remain public.
     if (isLoginPage) {
-      setLoading(false);
+      setCheckingAuth(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        // Redirect immediately if not logged in
-        router.replace("/admin/login");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setAuthenticated(false);
+        setCheckingAuth(false);
+
+        router.replace('/admin/login');
         return;
       }
 
-      setUser(currentUser);
-      setLoading(false);
+      try {
+        // Force refresh token so Firebase verifies the current session.
+        await user.getIdToken(true);
+
+        setAuthenticated(true);
+      } catch (error) {
+        console.error('Admin authentication error:', error);
+
+        setAuthenticated(false);
+        router.replace('/admin/login');
+      } finally {
+        setCheckingAuth(false);
+      }
     });
 
     return () => unsubscribe();
-  }, [router, pathname, isLoginPage]);
+  }, [isLoginPage, router]);
 
-  // Render the login page directly without sidebar wrapper
+  /*
+   * ADMIN LOGIN
+   * No sidebar and no auth requirement.
+   */
   if (isLoginPage) {
     return <>{children}</>;
   }
 
-  // Render a full-screen loading screen while checking authentication status
-  if (loading) {
+  /*
+   * AUTH CHECK SCREEN
+   */
+  if (checkingAuth) {
     return (
-      <div className="min-h-screen w-full bg-[#02142d] text-white flex flex-col items-center justify-center font-sans antialiased">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-[#F7931E] border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-medium text-slate-300 animate-pulse">
-            Verifying Administrator Session...
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto mb-4 w-12 h-12 rounded-2xl bg-[#0057B8] flex items-center justify-center text-white text-xl font-black animate-pulse">
+            V
+          </div>
+
+          <p className="text-white text-sm font-semibold">
+            Verifying Admin Access...
+          </p>
+
+          <p className="text-slate-500 text-xs mt-1">
+            Please wait
           </p>
         </div>
       </div>
     );
   }
 
-  // Block rendering content entirely if user is unauthenticated
-  if (!user) {
-    return null;
+  /*
+   * NOT AUTHENTICATED
+   * Redirect is already triggered above.
+   */
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-white text-sm">
+          Redirecting to admin login...
+        </div>
+      </div>
+    );
   }
 
-  // Render Protected Admin UI
+  /*
+   * PROTECTED ADMIN AREA
+   *
+   * Sidebar is rendered ONLY here.
+   */
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
-      <div className="shrink-0 hidden md:block">
-        <AdminSidebar />
-      </div>
-      <main className="flex-1 min-w-0 overflow-y-auto">
+    <div className="min-h-screen bg-slate-100">
+      <AdminSidebar />
+
+      <main className="md:ml-64 min-h-screen">
         {children}
       </main>
     </div>
